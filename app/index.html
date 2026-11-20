@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Coach Arena — Top 5% Trainer</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to content</a>
+
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg class="brand-fox-svg" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="40" height="40" rx="12" fill="url(#foxGrad)"/>
+          <path d="M9 12L15 17L20 15L25 17L31 12L30 24C30 29 25.5 33 20 33C14.5 33 10 29 10 24L9 12Z" fill="#FFF7ED"/>
+          <path d="M9 12L15 17L11.5 20L9 12Z" fill="#EA580C"/>
+          <path d="M31 12L25 17L28.5 20L31 12Z" fill="#EA580C"/>
+          <circle cx="15.5" cy="22.5" r="2" fill="#141824"/>
+          <circle cx="24.5" cy="22.5" r="2" fill="#141824"/>
+          <path d="M18 27C19 28 21 28 22 27" stroke="#EA580C" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="20" cy="25.2" r="1.4" fill="#141824"/>
+          <defs>
+            <linearGradient id="foxGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#3B5BDB"/>
+              <stop offset="1" stop-color="#6D28D9"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <h1>Interview Arena</h1>
+        <p class="subtitle">Top 5% English &amp; Tech Studio</p>
+      </div>
+    </div>
+
+    <div class="hud-bar" aria-label="Gamification status">
+      <div class="hud-pill streak-pill" title="Daily Streak">
+        <span aria-hidden="true">🔥</span>
+        <strong id="hud-streak">0</strong>
+        <span class="hud-unit">day</span>
+      </div>
+      <div class="hud-pill xp-pill" title="XP &amp; League">
+        <span aria-hidden="true">⚡</span>
+        <strong id="hud-xp">0</strong>
+        <span class="hud-unit">XP</span>
+        <div class="xp-mini-track" aria-hidden="true">
+          <div id="hud-xp-fill" class="xp-mini-fill" style="--xp-pct: 0%;"></div>
+        </div>
+      </div>
+      <div class="hud-pill gem-pill" title="Gems for Power-Ups">
+        <span aria-hidden="true">💎</span>
+        <strong id="hud-gems">150</strong>
+      </div>
+      <button type="button" id="open-shop-btn" class="shop-chip" title="Power-Up Shop — Spend XP or Gems" aria-label="Open Power-Up Shop">
+        <span aria-hidden="true">🛒</span>
+        <span class="chip-text">Shop</span>
+      </button>
+      <button type="button" id="open-setup-btn" class="setup-chip" title="Open LLM &amp; Voice Settings" aria-label="Open Settings">
+        <span id="setup-dot" class="status-dot is-warn" aria-hidden="true"></span>
+        <span id="setup-label" class="setup-label-text">Settings</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="main-nav" aria-label="Primary sections">
+    <button type="button" class="nav-tab is-active" data-view="view-path" aria-current="page">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>
+      <span class="nav-label">Daily Path</span>
+      <span class="nav-label-short">Path</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="view-targets">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+      <span class="nav-label">Targets</span>
+      <span class="nav-label-short">Targets</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="view-practice">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+      <span class="nav-label">Practice</span>
+      <span class="nav-label-short">Practice</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="view-arena">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="3"/><path d="m16 10 6-3v10l-6-3v-4z"/></svg>
+      <span class="nav-label">Call Arena</span>
+      <span class="nav-label-short">Arena</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="view-about">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.8-3.8 5-5.5 8-5.5s6.2 1.7 8 5.5"/></svg>
+      <span class="nav-label">About Me</span>
+      <span class="nav-label-short">Me</span>
+    </button>
+    <button type="button" class="nav-tab" data-view="view-mistakes">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="m9 9.5 2 2 4-4"/></svg>
+      <span class="nav-label">Mistakes Vault</span>
+      <span class="nav-label-short">Vault</span>
+    </button>
+    <button type="button" class="nav-tab nav-tab-desktop-only" data-view="view-settings">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="nav-label">Settings</span>
+      <span class="nav-label-short">Settings</span>
+    </button>
+  </nav>
+
+  <main id="main-content" class="app-main" tabindex="-1">
+    <!-- VIEW 0A: FIRST-RUN SETUP & CV ONBOARDING -->
+    <section id="view-onboarding" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-onboarding">
+      <div class="onboarding-shell">
+        <div class="hero-banner onboarding-hero">
+          <div>
+            <span id="onb-hero-badge" class="badge" style="background:#ffffff;color:#0b57d0;margin-bottom:0.45rem;display:inline-flex;">👋 Welcome · Step 1 of 2</span>
+            <h2 id="onb-hero-title">Set Up Local AI &amp; Voice First</h2>
+            <p id="onb-hero-subtitle">Everything runs 100% locally on your machine. Verify Ollama &amp; ZONOS3-Mini voice below, then upload your CV to build your 20-Day Training Path.</p>
+          </div>
+        </div>
+
+        <nav class="onb-stepper" aria-label="Onboarding steps">
+          <ol class="onb-stepper-list">
+            <li>
+              <button type="button" id="btn-onb-step-1" class="onb-step-pill is-active" aria-current="step">
+                <span class="onb-step-num">1</span>
+                <span>AI &amp; Voice Setup</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" id="btn-onb-step-2" class="onb-step-pill">
+                <span class="onb-step-num">2</span>
+                <span>Upload CV &amp; Launch</span>
+              </button>
+            </li>
+          </ol>
+        </nav>
+
+        <!-- STEP 1: OLLAMA & ZONOS3 SETUP -->
+        <div id="onb-step-setup" class="onb-step-panel">
+          <div class="onb-setup-grid">
+            <int-card heading="🧠 1. Local LLM Engine (Ollama)" heading-id="heading-onb-ollama" badge-id="onb-ollama-badge" badge-text="Checking..." card-class="onb-setup-card">
+              <div id="onb-setup-checklist" class="setup-checklist"></div>
+
+              <div class="setup-actions-row">
+                <int-button control-id="btn-onb-start-ollama" variant="secondary" label="▶ Start Ollama Daemon"></int-button>
+                <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">🌐 Download Ollama</a>
+                <int-button control-id="btn-onb-refresh-setup" variant="ghost" label="↻ Re-check"></int-button>
+              </div>
+
+              <int-select
+                control-id="onb-setup-model-select"
+                label="Download a Fast Interview Model (if none installed)"
+                help="Recommended for 8–12 GB VRAM / Apple Silicon: LFM2.5-2.6B, LFM2-8B-A1B, Qwen 3.5 9B, or Llama 3.1 8B."
+                action-id="btn-onb-pull-model"
+                action-label="⬇ Pull Model"
+                action-variant="primary"
+              ></int-select>
+              <div id="onb-pull-progress" class="pull-progress" hidden></div>
+            </int-card>
+
+            <int-card heading="🎙️ 2. Neural Voice (ZONOS3-Mini)" heading-id="heading-onb-zonos" badge-id="onb-zonos-badge" badge-text="Optional" card-class="onb-setup-card">
+              <p id="onb-zonos-status" class="muted" style="margin:0;">Checking ZONOS3-Mini voice server on :1919...</p>
+              <p class="muted" style="margin:0;">One-click local 44.1 kHz neural voice setup (Apple Silicon Metal accelerated). If you are on Windows/Linux or prefer instant start, built-in Browser Voice works out of the box.</p>
+
+              <div class="setup-actions-row">
+                <int-button control-id="btn-onb-start-zonos" variant="primary" label="▶ Install &amp; Start ZONOS3 (:1919)"></int-button>
+                <a href="https://huggingface.co/Zyphra/ZONOS3-Mini" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">🤗 ZONOS3 Info</a>
+              </div>
+              <div id="onb-zonos-progress" class="pull-progress" hidden></div>
+            </int-card>
+          </div>
+
+          <p id="onb-setup-status-banner" class="shop-status-msg" aria-live="polite">Checking local Ollama &amp; voice readiness...</p>
+
+          <div class="onb-actions-split">
+            <int-button control-id="btn-onb-next-cv" variant="green" label="Continue to Step 2: Upload CV ▶"></int-button>
+          </div>
+        </div>
+
+        <!-- STEP 2: CV UPLOAD & ARENA GENERATION -->
+        <div id="onb-step-cv" class="onb-step-panel" hidden>
+          <form id="onboarding-form" class="onboarding-form" action="#">
+            <int-card heading="📄 Step 2: Upload Your CV &amp; Build Arena" heading-id="heading-onboarding" badge-text="100% Private Local AI" badge-class="badge badge-green">
+              <div class="targets-form-grid">
+                <int-field control-id="onb-name-input" label="Your Name (optional — auto-detected from CV)" placeholder="e.g. Alex Morgan"></int-field>
+                <int-select control-id="onb-planner-model" label="🧠 Local AI Model (CV &amp; Fake Job Generator)"></int-select>
+              </div>
+
+              <div id="onb-cv-dropzone" class="jd-dropzone" tabindex="0">
+                <div class="dropzone-copy">
+                  <strong>📤 Drop Your CV File Here or Choose a File (.pdf, .docx, .md, .txt, image)</strong>
+                  <span class="muted">We extract your real projects, tech stack, and metrics locally on your machine — nothing leaves your device.</span>
+                </div>
+                <div class="dropzone-actions">
+                  <label class="btn btn-secondary" for="onb-cv-file-input">📁 Choose CV File</label>
+                  <input type="file" id="onb-cv-file-input" accept=".pdf,.md,.txt,.tex,.docx,.doc,.rtf,.html,image/*" hidden>
+                  <span id="onb-cv-selected-file" class="badge badge-green" hidden>No file chosen</span>
+                </div>
+              </div>
+
+              <int-textarea control-id="onb-cv-paste-input" label="📝 Or Paste Your CV Text / Experience Summary" rows="6" placeholder="Paste your resume text here (role, years of experience, core stack, key projects &amp; measurable impact)..."></int-textarea>
+              <int-field control-id="onb-notes-input" label="🎯 Target Roles / Focus Notes (optional)" placeholder="e.g. Senior QA Lead EU remote, Java Spring Boot fintech, Flutter mobile lead..."></int-field>
+
+              <p id="onb-error-banner" class="shop-status-msg is-error" hidden></p>
+
+              <div class="onb-actions-split">
+                <int-button control-id="btn-onb-back-setup" variant="ghost" label="← Back to AI &amp; Voice Setup"></int-button>
+                <int-button control-id="btn-onb-start" type="submit" variant="green" label="🚀 Analyze My CV &amp; Build Arena ▶"></int-button>
+              </div>
+            </int-card>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 0B: ACTIVE CV PROCESSING & ETA COUNTDOWN SCREEN -->
+    <section id="view-processing" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="proc-headline">
+      <div class="processing-shell">
+        <int-card card-class="processing-card">
+          <div class="proc-hero">
+            <div class="proc-mascot-ring" aria-hidden="true">
+              <span id="proc-icon" class="proc-icon">⚡</span>
+            </div>
+            <div>
+              <span class="badge badge-green" style="margin-bottom:0.35rem;display:inline-flex;">⚡ Building Your Personal Interview Arena</span>
+              <h2 id="proc-headline">Preparing Your Custom Interviews &amp; Fake Jobs...</h2>
+              <p id="proc-subline" class="muted">Please stay on this screen — your dashboard will open automatically as soon as your path is ready.</p>
+            </div>
+          </div>
+
+          <div class="proc-metrics-row">
+            <span class="proc-time-pill">⏱️ Elapsed: <strong id="proc-elapsed">0s</strong></span>
+            <span class="proc-time-pill is-eta">⏳ Est. Time Remaining: <strong id="proc-eta">~25s</strong></span>
+            <span class="proc-time-pill is-pct"><strong id="proc-percent-label">5%</strong></span>
+          </div>
+
+          <progress id="proc-progress-bar" class="proc-progress-bar" max="100" value="5"></progress>
+
+          <div id="proc-live-detail" class="proc-live-detail" aria-live="polite">Initializing local AI analyzer...</div>
+
+          <ul id="proc-checklist" class="proc-checklist">
+            <li data-stage="extract" data-state="active">
+              <span class="proc-step-icon">📄</span>
+              <div class="proc-step-text">
+                <strong>1. Reading &amp; Parsing CV Document</strong>
+                <small class="muted">Extracting roles, projects, tech stack, and quantified impact</small>
+              </div>
+              <span class="proc-step-badge">Working...</span>
+            </li>
+            <li data-stage="profile" data-state="pending">
+              <span class="proc-step-icon">🧠</span>
+              <div class="proc-step-text">
+                <strong>2. Detecting Craft &amp; Generating Fake Jobs</strong>
+                <small class="muted">Calibrating role-authentic fake job ads to your exact skills</small>
+              </div>
+              <span class="proc-step-badge">Waiting</span>
+            </li>
+            <li data-stage="path" data-state="pending">
+              <span class="proc-step-icon">🗺️</span>
+              <div class="proc-step-text">
+                <strong>3. Tailoring 15 Interviewers &amp; 20-Day Path</strong>
+                <small class="muted">Adapting HR, Technical, Live Coding, System Design &amp; Offer tracks</small>
+              </div>
+              <span class="proc-step-badge">Waiting</span>
+            </li>
+            <li data-stage="saving" data-state="pending">
+              <span class="proc-step-icon">💾</span>
+              <div class="proc-step-text">
+                <strong>4. Saving Profile &amp; Launching Dashboard</strong>
+                <small class="muted">Storing locally in SQLite and preparing your Arena</small>
+              </div>
+              <span class="proc-step-badge">Waiting</span>
+            </li>
+          </ul>
+
+          <div id="proc-error-actions" class="setup-actions-row" hidden>
+            <int-button control-id="btn-proc-setup" variant="secondary" label="⚙️ AI &amp; Voice Setup"></int-button>
+            <int-button control-id="btn-proc-back" variant="ghost" label="← Edit CV &amp; Try Again"></int-button>
+          </div>
+        </int-card>
+      </div>
+    </section>
+
+    <!-- VIEW 1: DAILY PATH & SESSION PICKER -->
+    <section id="view-path" class="spa-view" tabindex="-1" aria-labelledby="heading-path">
+      <div class="hero-banner hero-path">
+        <div class="hero-path-copy">
+          <span class="hero-eyebrow">10-Minute Morning Gym</span>
+          <h2 id="heading-path">Your 20-Day Interview Path</h2>
+          <p>Tap today's milestone to warm up, or pick any interviewer + Fake Job below.</p>
+          <div class="hero-cta-row">
+            <button type="button" id="btn-hero-continue" class="btn btn-mint hero-cta-btn">▶ Start Today's Drill</button>
+          </div>
+        </div>
+        <div class="league-badge">
+          <span class="league-icon" aria-hidden="true">🏆</span>
+          <div>
+            <small>Current League</small>
+            <strong id="league-name">Top 15% Contender</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls-bar">
+        <div class="filter-chips" role="group" aria-label="Filter topics">
+          <button type="button" class="chip is-active" data-topic="ALL">All Topics</button>
+          <button type="button" class="chip" data-topic="HR">HR &amp; Pitch</button>
+          <button type="button" class="chip" data-topic="Behavioral">Behavioral</button>
+          <button type="button" class="chip" data-topic="Technical">Technical</button>
+          <button type="button" class="chip" data-topic="Live Coding">Live Coding</button>
+          <button type="button" class="chip" data-topic="System Design">System Design</button>
+          <button type="button" class="chip" data-topic="Negotiation">Negotiation</button>
+        </div>
+
+        <label class="jd-picker">
+          <span>Target Fake Job:</span>
+          <select id="global-jd-select"></select>
+        </label>
+        <button type="button" id="btn-new-fake-job" class="btn btn-secondary btn-compact" title="Generate a brand-new Fake Job tailored to your active CV">✨ New Fake Job</button>
+      </div>
+
+      <details id="active-fake-job-preview" class="fake-job-preview">
+        <summary id="active-fake-job-summary">📄 View Selected Fake Job Brief</summary>
+        <div id="active-fake-job-body" class="fake-job-body"></div>
+      </details>
+
+      <div class="split-home">
+        <int-card heading="20-Morning Interview Path" heading-id="heading-20day" badge-id="path-progress-label" badge-text="0 / 20 Completed" card-class="path-card">
+          <div id="morning-path-grid" class="path-grid"></div>
+        </int-card>
+
+        <int-card heading="All Interviewer Variations (15)" heading-id="heading-agents" card-class="agents-card">
+          <div id="agents-grid" class="agents-grid"></div>
+        </int-card>
+      </div>
+    </section>
+
+    <!-- VIEW 1B: PRE-CALL LOBBY / GREEN ROOM -->
+    <section id="view-lobby" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-lobby">
+      <div class="lobby-header">
+        <div>
+          <span class="badge badge-green">🎧 Green Room · Device &amp; Voice Check</span>
+          <h2 id="heading-lobby">Ready to Join Your Interview Call?</h2>
+          <p id="lobby-subtitle" class="muted">Test your camera, mic, and interviewer's ZONOS3 neural voice before stepping in.</p>
+        </div>
+        <int-button control-id="btn-lobby-back" variant="ghost" label="← Back to Path"></int-button>
+      </div>
+
+      <div class="lobby-grid">
+        <section class="card lobby-interviewer-card" aria-label="Interviewer Preview">
+          <div class="stage-top-bar">
+            <span id="lobby-role-badge" class="badge">HR Screening</span>
+            <span id="lobby-voice-badge" class="badge badge-green">Preset ZONOS3 Voice</span>
+          </div>
+
+          <div id="lobby-avatar-viewport" class="avatar-viewport lobby-avatar-box">
+            <div id="lobby-avatar-mount" class="avatar-mount"></div>
+          </div>
+
+          <div class="avatar-meta">
+            <strong id="lobby-avatar-name">Maya · Internal Fintech Talent Partner</strong>
+            <small id="lobby-avatar-desc" class="muted">Pre-configured unique voice &amp; persona</small>
+            <int-select control-id="lobby-voice-select" label="Interviewer Voice Preset" action-id="btn-lobby-test-voice" action-label="🔊 Hear Voice" action-variant="secondary"></int-select>
+            <int-select control-id="lobby-personality-select" label="🎲 Rolled Interviewer Mood (10 Modes)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll" action-variant="ghost"></int-select>
+            <p id="lobby-personality-tip" class="lobby-personality-tip muted"></p>
+            <label class="voice-toggle" style="margin-top:0.35rem;">
+              <input type="checkbox" id="lobby-continuous-toggle" checked>
+              <span>💬 Continuous Conversation Mode (recommended for HR)</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="card lobby-device-card" aria-label="Camera and Microphone Setup">
+          <div class="card-head">
+            <h3>📷 Your Camera &amp; Microphone Check</h3>
+            <span id="lobby-media-status" class="badge">Checking devices...</span>
+          </div>
+
+          <div class="lobby-video-frame">
+            <video id="lobby-video" autoplay playsinline muted></video>
+            <div id="lobby-video-fallback" class="cam-fallback">
+              <div id="lobby-self-initials" class="cam-initials">CA</div>
+              <span>Camera off / awaiting permission</span>
+            </div>
+            <span id="lobby-self-nameplate" class="pip-nameplate">You</span>
+          </div>
+
+          <div class="lobby-mic-box">
+            <div class="mic-meter-header">
+              <span>🎙️ Mic Input Level</span>
+              <span id="lobby-stt-preview" class="muted">Click Test Mic &amp; say hello in English...</span>
+            </div>
+            <div class="mic-meter-track" role="progressbar" aria-label="Microphone volume level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="lobby-mic-meter" class="mic-meter-fill"></div>
+            </div>
+          </div>
+
+          <div class="lobby-actions-row">
+            <int-button control-id="btn-lobby-toggle-cam" variant="ghost" label="📷 Camera On/Off"></int-button>
+            <int-button control-id="btn-lobby-test-mic" variant="mic" label="🎙️ Test Mic (English STT)"></int-button>
+            <int-button control-id="btn-join-call" variant="green" btn-class="btn-join-call" label="📞 Join Interview Call ▶"></int-button>
+          </div>
+        </section>
+      </div>
+
+      <int-card heading="📋 Job Description &amp; Session Brief" heading-id="heading-lobby-jd" badge-id="lobby-jd-badge" badge-text="Target Role" card-class="lobby-jd-card">
+        <div id="lobby-jd-body" class="fake-job-body lobby-jd-body"></div>
+      </int-card>
+    </section>
+
+    <!-- VIEW 2: FULL-SCREEN REALISTIC VOICE/VIDEO CALL ARENA -->
+    <section id="view-arena" class="spa-view inactive call-fullscreen" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-arena">
+      <div id="arena-layout" class="call-arena-layout">
+        <section id="interviewer-stage" class="call-stage" data-persona="hr" data-gender="female" aria-label="Live Video Call Stage">
+          <div class="call-stage-topbar">
+            <div class="call-participant-chip">
+              <span id="avatar-role-badge" class="badge">HR Screening</span>
+              <strong id="avatar-name">Maya · Talent Partner</strong>
+              <span id="arena-subtitle" class="muted call-model-meta"></span>
+            </div>
+            <div class="call-status-group">
+              <span id="arena-personality-badge" class="badge">🎲 Mood</span>
+              <span id="avatar-status-pill" class="avatar-status-pill">👀 Watching</span>
+              <label class="call-mini-toggle" title="Show 3D Interviewer &amp; Voice">
+                <input type="checkbox" id="auto-speak-toggle" checked>
+                <span>🎙️ Voice</span>
+              </label>
+              <label class="call-mini-toggle" title="Keep HR conversations flowing continuously">
+                <input type="checkbox" id="continuous-flow-toggle" checked>
+                <span>💬 Continuous</span>
+              </label>
+              <select id="arena-voice-select" class="compact-voice-select" aria-label="Interviewer Voice Preset"></select>
+              <int-button control-id="btn-call-back" variant="dark-ghost" label="← Path"></int-button>
+            </div>
+          </div>
+
+          <div class="call-video-canvas">
+            <div class="voice-rings" aria-hidden="true">
+              <span></span>
+              <span></span>
+            </div>
+
+            <div id="thinking-bubble" class="thinking-bubble" hidden aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+
+            <div id="video-tips-overlay" class="video-tips-overlay" aria-label="Live English Coach Tips">
+              <div class="tips-overlay-head">
+                <span class="tips-title">⚡ Live English Coach</span>
+                <div class="tips-mini-powerups" role="group" aria-label="Interview Power-Ups">
+                  <button type="button" id="pu-shield-btn" class="mini-pu-btn" title="Anti-Freeze 2m Shield">🧊 <span id="pu-shield-count">3</span></button>
+                  <button type="button" id="pu-hint-btn" class="mini-pu-btn" title="Senior Power-Verb Hint">💡 <span id="pu-hint-count">4</span></button>
+                  <button type="button" id="pu-retry-btn" class="mini-pu-btn" title="2x XP Boost">🔄 <span id="pu-retry-count">2</span></button>
+                  <button type="button" id="pu-shop-btn" class="mini-pu-btn mini-pu-shop" title="Open Power-Up Shop (spend XP or Gems)">🛒</button>
+                </div>
+                <button type="button" id="btn-toggle-tips" class="tips-collapse-btn" aria-expanded="true" title="Minimize/Expand Coach Tips">−</button>
+              </div>
+              <div id="shield-timer" class="shield-timer is-overlay" hidden>
+                <span>🧊 Analysis Phase:</span>
+                <strong id="shield-countdown">02:00</strong>
+              </div>
+              <div id="hint-drawer" class="hint-drawer is-overlay" hidden></div>
+              <div id="coach-box" class="coach-box overlay-coach-scroll" aria-live="polite">
+                <div class="coach-empty">Tips &amp; Senior English upgrades appear here while you talk.</div>
+              </div>
+            </div>
+
+            <div id="call-avatar-mount" class="call-avatar-mount"></div>
+
+            <div class="call-caption-hint">
+              <small id="avatar-persona-hint">Continuous natural dialogue</small>
+            </div>
+
+            <div id="self-cam-pip" class="self-cam-pip">
+              <video id="call-video" autoplay playsinline muted></video>
+              <div id="call-video-fallback" class="cam-fallback is-compact">
+                <div id="arena-self-initials" class="cam-initials">CA</div>
+              </div>
+              <span id="arena-self-nameplate" class="pip-nameplate">You</span>
+            </div>
+          </div>
+
+          <div id="live-retry-banner" class="live-retry-banner" hidden>
+            <span class="retry-pill">🔄 Say It Again</span>
+            <span id="live-retry-text" class="live-retry-text"></span>
+            <button id="btn-cancel-retry" type="button" class="mini-pu-btn" title="Cancel retry practice">✕</button>
+          </div>
+          <div id="live-stt-bar" class="live-stt-bar" hidden>
+            <span class="live-dot" aria-hidden="true"></span>
+            <strong>Speaking live:</strong>
+            <span id="live-stt-text">Listening...</span>
+          </div>
+
+          <div class="call-dock" role="toolbar" aria-label="Call Controls">
+            <int-button control-id="mic-btn" variant="mic" btn-class="btn-call-speak" label="🎙️ Speak English"></int-button>
+            <int-button control-id="btn-toggle-cam" variant="dark-pill" label="📷 Cam Off"></int-button>
+            <int-button control-id="btn-toggle-scratchpad" variant="dark-pill" aria-expanded="false" aria-controls="call-scratchpad-panel" hidden>
+              <span>📝 Scratchpad</span>
+            </int-button>
+            <int-button control-id="btn-toggle-chat" variant="dark-pill" aria-expanded="false" aria-controls="call-chat-drawer">
+              <span>💬 Chat</span>
+              <span id="chat-unread-badge" class="chat-unread-badge" hidden>0</span>
+            </int-button>
+            <int-button control-id="btn-finish-eval" variant="gold" label="📊 Score (1–10)"></int-button>
+            <int-button control-id="btn-hangup" variant="hangup" label="📞 End Call"></int-button>
+          </div>
+          <span id="mic-status" class="mic-status-line">Click Speak to talk naturally — Whisper Large-v3-Turbo listens in real time.</span>
+        </section>
+
+        <aside id="call-scratchpad-panel" class="call-scratchpad-panel" hidden aria-label="Shared Collaborative Logic Scratchpad">
+          <div class="scratchpad-head">
+            <div class="scratchpad-title-row">
+              <strong id="scratchpad-puzzle-title">🧩 Logic Puzzle Scratchpad</strong>
+              <span id="scratchpad-diff-badge" class="badge badge-green">10 min</span>
+            </div>
+            <div class="scratchpad-head-controls">
+              <div class="logic-timer-pill" aria-label="Puzzle Timer">
+                <span>⏱️</span>
+                <strong id="logic-timer-display">10:00</strong>
+                <button type="button" id="btn-logic-timer-toggle" class="mini-pu-btn" title="Pause or resume timer">⏸</button>
+                <button type="button" id="btn-logic-timer-reset" class="mini-pu-btn" title="Reset timer">↺</button>
+              </div>
+              <span id="scratchpad-sync-pill" class="scratchpad-sync-pill">🟢 Live · Tutor sees edits</span>
+              <button type="button" id="btn-close-scratchpad" class="icon-close" aria-label="Hide scratchpad">✕</button>
+            </div>
+          </div>
+
+          <details id="scratchpad-problem-box" class="scratchpad-problem-box" open>
+            <summary>
+              <span>📋 Problem Statement &amp; Constraints</span>
+              <button type="button" id="btn-logic-hint" class="btn btn-ghost btn-compact">💡 Gentle Hint</button>
+            </summary>
+            <div id="scratchpad-problem-body" class="scratchpad-problem-body"></div>
+            <div id="logic-hint-banner" class="logic-hint-banner" hidden></div>
+          </details>
+
+          <div id="scratchpad-tutor-pin" class="scratchpad-tutor-pin" hidden>
+            <div class="tutor-pin-head">
+              <strong>📌 Tutor Board Suggestion</strong>
+              <div class="tutor-pin-actions">
+                <button type="button" id="btn-apply-tutor-pin" class="btn btn-secondary btn-compact">➕ Add to Notepad</button>
+                <button type="button" id="btn-dismiss-tutor-pin" class="icon-close" aria-label="Dismiss suggestion">✕</button>
+              </div>
+            </div>
+            <pre id="scratchpad-tutor-pin-text" class="tutor-pin-text"></pre>
+          </div>
+
+          <div class="scratchpad-toolbar" role="toolbar" aria-label="Scratchpad quick helpers">
+            <button type="button" class="btn btn-ghost btn-compact" data-sp-insert="table">+ Table</button>
+            <button type="button" class="btn btn-ghost btn-compact" data-sp-insert="step">+ Step</button>
+            <button type="button" class="btn btn-ghost btn-compact" data-sp-insert="hyp">+ Hypothesis</button>
+            <button type="button" class="btn btn-ghost btn-compact" data-sp-insert="check">✓</button>
+            <button type="button" class="btn btn-ghost btn-compact" data-sp-insert="cross">✗</button>
+            <button type="button" id="btn-scratchpad-reset" class="btn btn-ghost btn-compact">↺ Template</button>
+          </div>
+
+          <textarea id="scratchpad-editor" class="scratchpad-editor" spellcheck="false" aria-label="Collaborative Logic Scratchpad" placeholder="Write your assumptions, truth tables, equations, or steps here — your tutor sees every update..."></textarea>
+
+          <div class="scratchpad-footer">
+            <label class="scratchpad-auto-toggle" title="Automatically ask your tutor to react 4 seconds after you pause typing">
+              <input type="checkbox" id="scratchpad-auto-observe">
+              <span>Auto-react after edit pause</span>
+            </label>
+            <button type="button" id="btn-share-scratchpad" class="btn btn-primary btn-compact">👀 Share Notes with Tutor</button>
+          </div>
+        </aside>
+
+        <aside id="call-chat-drawer" class="call-chat-drawer" hidden aria-label="Live Call Chat Window">
+          <div class="chat-drawer-head">
+            <div>
+              <h3 id="heading-arena" style="margin:0;font-size:1rem;">💬 Live Call Chat</h3>
+              <span class="badge" style="font-size:0.7rem;">Streaming Transcript</span>
+            </div>
+            <button type="button" id="btn-close-chat" class="icon-close" aria-label="Close chat panel">✕</button>
+          </div>
+
+          <div id="chat-log" class="chat-log call-chat-scroll" aria-live="polite"></div>
+
+          <div class="composer">
+            <div class="input-row">
+              <textarea id="answer-input" rows="2" aria-label="Type your English answer" placeholder="Your live speech streams here, or type in English..."></textarea>
+              <int-button control-id="send-btn" variant="primary" label="Send ▶"></int-button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- VIEW 1D: PRACTICE STUDIO (ENGLISH CONVERSATION + LOGIC PUZZLES + GUEST MODE) -->
+    <section id="view-practice" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-practice">
+      <div class="hero-banner tutor-hero">
+        <div>
+          <h2 id="heading-practice">🗣️ Practice Studio</h2>
+          <p>Choose relaxed English voice conversation or timed <strong>5–15 min Interview Logic Puzzles</strong> with a shared live scratchpad — or toggle <strong>Guest Mode</strong> for anonymous practice.</p>
+        </div>
+        <span id="practice-mode-badge" class="badge" style="background:#ffffff;color:#065f46;">💬 Stress-Free English Practice</span>
+      </div>
+
+      <int-card heading="🎯 Choose Practice Type &amp; Privacy" heading-id="heading-practice-setup" badge-text="Voice + Live Collaboration" badge-class="badge badge-green">
+        <div id="practice-track-tabs" class="practice-track-tabs" role="tablist" aria-label="Practice track selector">
+          <button type="button" role="tab" aria-selected="true" class="practice-track-tab is-active" data-practice-track="conversation">
+            💬 English Conversation
+          </button>
+          <button type="button" role="tab" aria-selected="false" class="practice-track-tab" data-practice-track="logic">
+            🧩 Logic Puzzles (5 / 10 / 15 min + Scratchpad)
+          </button>
+        </div>
+
+        <int-toggle
+          control-id="practice-guest-toggle"
+          label="🧑 Guest Mode (Anonymous Session)"
+          description="Turn ON when someone else practices on this device: hides your personal Learning Map & CV, uses neutral context, and saves zero personality notes, XP, or mistakes."
+        ></int-toggle>
+
+        <div id="practice-conversation-controls">
+          <div class="targets-form-grid">
+            <int-select control-id="tutor-topic-select" label="Conversation Focus"></int-select>
+            <int-select control-id="tutor-level-select" label="English Calibration Level"></int-select>
+          </div>
+          <int-field control-id="tutor-custom-topic" label="✏️ Or Type Anything You Want to Talk About (optional)" placeholder="e.g. Travel stories, ordering in London, weekend plans..."></int-field>
+        </div>
+      </int-card>
+
+      <div id="practice-logic-panel" class="practice-logic-panel" hidden>
+        <int-card heading="🧩 Interview Logic Puzzles &amp; Brainteasers" heading-id="heading-practice-logic" badge-id="logic-puzzle-count" badge-text="12 Puzzles Ready" badge-class="badge badge-green">
+          <div class="logic-controls-row">
+            <div id="logic-diff-chips" class="filter-chips" role="group" aria-label="Filter puzzle difficulty">
+              <button type="button" class="chip is-active" data-logic-diff="ALL">All Timers</button>
+              <button type="button" class="chip" data-logic-diff="5min">⚡ 5 min · Easy</button>
+              <button type="button" class="chip" data-logic-diff="10min">🎯 10 min · Medium</button>
+              <button type="button" class="chip" data-logic-diff="15min">🔥 15 min · Hard</button>
+            </div>
+            <div class="logic-gen-bar">
+              <select id="logic-category-select" aria-label="Logic puzzle category"></select>
+              <select id="logic-gen-diff-select" aria-label="Difficulty for generated puzzle"></select>
+              <button type="button" id="btn-generate-logic-puzzle" class="btn btn-primary btn-compact">✨ Generate New AI Puzzle</button>
+            </div>
+          </div>
+
+          <div id="logic-puzzles-grid" class="logic-puzzles-grid"></div>
+
+          <div id="logic-selected-preview" class="logic-selected-preview" hidden>
+            <div class="logic-preview-head">
+              <div>
+                <span id="logic-preview-diff" class="badge badge-green">10 min</span>
+                <span id="logic-preview-cat" class="badge">Deduction</span>
+                <h4 id="logic-preview-title" style="margin:0.35rem 0 0 0;">Select a puzzle</h4>
+              </div>
+              <button type="button" id="btn-start-logic-call" class="btn btn-green">🎧 Start Logic Call with Tutor ▶</button>
+            </div>
+            <p id="logic-preview-prompt" class="logic-preview-prompt"></p>
+            <ul id="logic-preview-constraints" class="logic-preview-constraints"></ul>
+          </div>
+        </int-card>
+      </div>
+
+      <h3 id="practice-teachers-heading" class="tutor-section-title">Choose Your Female Practice Partner</h3>
+      <div id="tutor-teachers-grid" class="tutor-grid"></div>
+
+      <div id="practice-guest-notice" class="guest-notice-banner" hidden>
+        <strong>🧑 Guest Mode Active:</strong> Personal Learning Map, Hobbies, Thinking Style, and CV profile are hidden. Nothing from Guest conversations will be saved to your account.
+      </div>
+
+      <int-card id="practice-memory-section" heading="🧠 My Learning &amp; Thinking Map" heading-id="heading-tutor-map" badge-id="tutor-map-updated" badge-text="Auto-Updates in Background" card-class="tutor-map-card">
+        <div id="tutor-memory-body" class="tutor-memory-body"></div>
+        <div class="tutor-memory-controls">
+          <input type="text" id="tutor-add-hobby-input" class="full-input" style="max-inline-size:280px;" placeholder="Add a hobby/interest for analogies (e.g. cycling, coffee)..." aria-label="Add hobby or interest">
+          <int-button control-id="btn-tutor-add-hobby" variant="secondary" label="+ Add Interest"></int-button>
+          <int-button control-id="btn-tutor-reset-map" variant="ghost" label="🔄 Reset Map"></int-button>
+        </div>
+      </int-card>
+    </section>
+
+    <!-- VIEW 1C: TARGET INTERVIEWS (CUSTOM JD + SCREENSHOT OCR + HEAVY PLANNER) -->
+    <section id="view-targets" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-targets">
+      <div class="hero-banner hero-targets">
+        <div>
+          <h2 id="heading-targets">Target Company Prep &amp; Custom Interview Series</h2>
+          <p>Paste a Job Description or drop/paste screenshots (<kbd>Cmd+V</kbd>). A heavy reasoning model builds your custom prep pack &amp; multi-round interview series.</p>
+        </div>
+        <a href="#saved-targets-card" id="btn-targets-jump-saved" class="btn btn-ghost btn-compact hero-jump-btn">🏢 Saved Packs ↓</a>
+      </div>
+
+      <div class="targets-layout">
+        <int-card heading="✨ Build New Company Prep Pack" heading-id="heading-builder" card-class="targets-builder-card">
+          <div class="targets-form-grid">
+            <int-select control-id="planner-model-select" label="🧠 Heavy Analyzer Model (27B / 35B / 24B recommended)"></int-select>
+            <int-select control-id="vision-model-select" label="👁️ Screenshot Vision OCR Model"></int-select>
+            <int-field control-id="target-company-input" label="Company Name (optional — auto-detected)" placeholder="e.g. Stripe, Klarna, Adyen..."></int-field>
+            <int-field control-id="target-role-input" label="Target Role Title (optional)" placeholder="e.g. Senior Frontend Engineer"></int-field>
+          </div>
+
+          <div id="jd-dropzone" class="jd-dropzone" tabindex="0">
+            <div class="dropzone-copy">
+              <strong>📸 Paste JD Screenshot (<kbd>Cmd+V</kbd> anywhere here) or Upload Image(s)</strong>
+              <span class="muted">Vision AI extracts all requirements automatically — supports multi-screenshot ads.</span>
+            </div>
+            <div class="dropzone-actions">
+              <label class="btn btn-secondary" for="jd-image-input">📁 Choose Screenshot(s)</label>
+              <input type="file" id="jd-image-input" accept="image/*" multiple hidden>
+              <int-button control-id="btn-extract-images" variant="ghost" label="👁️ Extract Text from Image(s)"></int-button>
+            </div>
+            <div id="jd-image-previews" class="jd-image-previews" hidden></div>
+          </div>
+
+          <int-textarea control-id="target-jd-textarea" label="📄 Job Description Text (paste directly or auto-filled from screenshot)" rows="8" placeholder="Paste the full job description here (requirements, tech stack, responsibilities, salary band)..."></int-textarea>
+          <int-field control-id="target-notes-input" label="🎯 Extra Focus / Salary Notes (optional)" placeholder="e.g. Focus on React gap strategy or €65/h EU B2B negotiation"></int-field>
+
+          <div class="targets-submit-row">
+            <int-button control-id="btn-generate-series" variant="primary" label="✨ Analyze JD &amp; Generate Interview Series"></int-button>
+          </div>
+
+          <int-progress control-id="planner-progress" steps="ocr:1. Screenshot OCR|fit:2. JD &amp; Gap Fit|study:3. Q&amp;A Study Pack|rounds:4. Interview Rounds"></int-progress>
+        </int-card>
+
+        <int-card id="saved-targets-card" heading="🏢 Saved Target Interview Series" heading-id="heading-saved-targets" badge-id="saved-targets-count" badge-text="0 Saved" card-class="targets-saved-card">
+          <div id="saved-targets-list" class="saved-targets-list">
+            <p class="muted">No target company packs generated yet. Paste a job description or screenshot on the left to build your first tailored series!</p>
+          </div>
+        </int-card>
+      </div>
+    </section>
+
+    <!-- VIEW 3: ABOUT ME (CANDIDATE PROFILE, CV VERSIONS, AI PATH BUILDER & GROWTH ANALYTICS) -->
+    <section id="view-about" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-about">
+      <div class="hero-banner settings-hero">
+        <div>
+          <h2 id="heading-about">About Me — CV Profile &amp; Tailored Path</h2>
+          <p>Inspect your active CV profile, upload new CV versions (PDF, DOCX, MD, TXT), and let your Heavy LLM rebuild the 20-Day Interview Path.</p>
+        </div>
+        <div class="settings-hero-actions">
+          <span id="about-active-cv-badge" class="badge badge-green">📄 v1 · Baseline CV</span>
+          <int-button control-id="btn-about-go-path" variant="secondary" label="🗺️ Open Daily Path ▶"></int-button>
+        </div>
+      </div>
+
+      <div class="about-grid">
+        <int-card heading="🪪 Active Candidate Profile &amp; CV History" heading-id="heading-cv-profile" badge-id="about-cv-count" badge-text="1 Version">
+          <div id="about-profile-view" class="about-profile-view"></div>
+          <div class="about-versions-head">
+            <strong>📚 Uploaded CV Versions</strong>
+            <small class="muted">Switching versions immediately updates Daily Path &amp; Interviewer context</small>
+          </div>
+          <div id="cv-versions-list" class="cv-versions-list"></div>
+        </int-card>
+
+        <int-card heading="📤 Upload Any CV &amp; Auto-Build Interviews + Fake Jobs" heading-id="heading-cv-upload" badge-text="Any Role · 20 Days + JDs" badge-class="badge badge-green">
+          <int-select control-id="cv-planner-model" label="🧠 Heavy Analyzer Model (27B / 35B / 24B recommended)"></int-select>
+
+          <div id="cv-dropzone" class="jd-dropzone" tabindex="0">
+            <div class="dropzone-copy">
+              <strong>📄 Drop ANY Developer / QA / Mobile CV Here (.pdf, .docx, .md, .txt, image)</strong>
+              <span class="muted">Supports QA/SDET, Java, .NET/C#, PHP, Flutter, Python, DevOps &amp; Frontend — rebuilds interviewers, Fake Jobs &amp; 20-Day Path automatically.</span>
+            </div>
+            <div class="dropzone-actions">
+              <label class="btn btn-secondary" for="cv-file-input">📁 Choose CV File</label>
+              <input type="file" id="cv-file-input" accept=".pdf,.md,.txt,.tex,.docx,.doc,.rtf,.html,image/*" hidden>
+              <span id="cv-selected-file" class="badge" hidden>No file chosen</span>
+            </div>
+          </div>
+
+          <int-textarea control-id="cv-paste-input" label="📝 Or Paste Updated CV Text / Highlights (optional)" rows="5" placeholder="Paste full CV markdown/text here (e.g. QA Automation, Java Spring, .NET, PHP Laravel, Flutter...), or leave blank if uploading a file above..."></int-textarea>
+          <int-field control-id="cv-notes-input" label="🎯 Focus Goals for Tailored Path &amp; Fake Jobs (optional)" placeholder="e.g. Senior QA Lead EU remote, Java FinTech microservices, Flutter banking app..."></int-field>
+
+          <div class="targets-submit-row">
+            <int-button control-id="btn-upload-cv" variant="green" label="🚀 Analyze CV &amp; Build Interviews + Fake Jobs"></int-button>
+          </div>
+
+          <int-progress control-id="cv-progress" steps="extract:1. Parse CV File|profile:2. Profile Fit|path:3. Build 20-Day Path|saving:4. Activate &amp; Save"></int-progress>
+        </int-card>
+      </div>
+
+      <h3 class="about-analytics-title">📈 Top 5% Growth Curves &amp; Session Analytics</h3>
+      <div class="stats-summary-grid" id="stats-kpis"></div>
+
+      <div class="stats-charts-grid">
+        <int-card heading="Overall Score Curve (1–10)" heading-id="heading-curve" badge-text="Target: 8.5+ (Top 5%)" badge-class="badge badge-green" card-class="chart-card">
+          <div id="curve-chart-wrap" class="svg-chart-wrap"></div>
+        </int-card>
+
+        <int-card heading="Mastery Curve by Topic" heading-id="heading-topics" card-class="chart-card">
+          <div id="topic-bars" class="topic-bars"></div>
+        </int-card>
+      </div>
+
+      <int-card heading="4 Core Evaluation Dimensions" heading-id="heading-dimensions">
+        <div id="dimension-bars" class="dimension-bars"></div>
+      </int-card>
+    </section>
+
+    <!-- VIEW 4: MISTAKES VAULT & SENIOR TIPS -->
+    <section id="view-mistakes" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-mistakes">
+      <div class="hero-banner">
+        <div>
+          <h2 id="heading-mistakes">Mistakes Vault &amp; Senior English Tips</h2>
+          <p>Every grammar slip, non-native phrase, or plain B2 sentence caught in training is logged here by frequency.</p>
+        </div>
+      </div>
+
+      <search class="mistakes-search-bar">
+        <int-field control-id="mistakes-search-input" type="search" label="Filter mistakes or senior tips:" placeholder="Search e.g. 'architecture', 'testing', 'tense', 'upgrade'..."></int-field>
+      </search>
+
+      <div class="mistakes-layout">
+        <int-card heading="Your Frequent Mistakes (Sorted by Count)" heading-id="heading-freq-mistakes">
+          <div id="mistakes-list" class="mistakes-list"></div>
+        </int-card>
+
+        <int-card heading="25 B2 → C1 Senior English Upgrades" heading-id="heading-b2-upgrades">
+          <div id="cheatsheet-upgrades" class="upgrades-list"></div>
+        </int-card>
+      </div>
+    </section>
+
+    <!-- VIEW 5: TACTILE LLM, VOICE & SYSTEM SETTINGS PAGE -->
+    <section id="view-settings" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-settings">
+      <div class="hero-banner settings-hero">
+        <div>
+          <h2 id="heading-settings">Local LLM, Voice &amp; Arena Settings</h2>
+          <p>Configure your local Ollama models, GPU heavy analyzer, neural voice synthesis, and SQLite storage.</p>
+        </div>
+        <div class="settings-hero-actions">
+          <span id="settings-db-badge" class="badge badge-green">🗄️ SQLite WAL Active</span>
+          <int-button control-id="btn-refresh-setup" variant="secondary" label="↻ Refresh System Check"></int-button>
+        </div>
+      </div>
+
+      <div class="setup-checklist" id="setup-checklist"></div>
+
+      <form id="settings-form" action="#" method="POST" class="settings-form">
+        <div class="settings-grid">
+          <int-card heading="🧠 Local LLM Engines" heading-id="heading-set-llm" badge-text="100% Local Ollama" badge-class="badge badge-green">
+            <int-select
+              control-id="model-select"
+              label="Interview Live Chat LLM (Fast Turn Responses)"
+              help="Drives spoken interviewer turns, streaming tips, and post-call scorecards."
+              action-id="btn-pull-selected"
+              action-label="⬇ Pull Selected"
+              action-variant="secondary"
+            ></int-select>
+
+            <int-field
+              control-id="custom-model-input"
+              label="Pull Custom Ollama or HuggingFace GGUF Model"
+              placeholder="hf.co/LiquidAI/LFM2.5-2.6B-GGUF"
+              help="Enter any valid Ollama tag or hf.co repository tag to download directly."
+              action-id="btn-pull-model"
+              action-label="⬇ Pull Custom"
+              action-variant="primary"
+            ></int-field>
+
+            <div id="pull-progress" class="pull-progress" hidden></div>
+
+            <div class="settings-two-col">
+              <int-select
+                control-id="settings-planner-model"
+                label="Heavy JD Analyzer Model (27B / 35B / 24B)"
+                help="Used in Target Interviews for deep fit &amp; Q&amp;A prep."
+              ></int-select>
+              <int-select
+                control-id="settings-vision-model"
+                label="Screenshot Vision OCR Model"
+                help="Reads pasted/dropped job description images."
+              ></int-select>
+            </div>
+
+            <div class="setup-actions-row">
+              <int-button control-id="btn-start-ollama" variant="secondary" label="▶ Start Ollama Daemon"></int-button>
+              <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">🌐 Ollama Install Page</a>
+            </div>
+          </int-card>
+
+          <int-card heading="🎙️ Neural Voice &amp; Call Defaults" heading-id="heading-set-voice" badge-text="ZONOS3 + Whisper">
+            <int-select control-id="tts-engine-select" label="TTS Voice Engine">
+              <option value="auto">Auto (ZONOS3-Mini on :1919 → Browser Fallback)</option>
+              <option value="browser">Browser Built-in English Voice Only</option>
+            </int-select>
+
+            <int-select
+              control-id="zonos-voice-select"
+              label="Default ZONOS3-Mini Voice (44.1 kHz)"
+              action-id="btn-start-zonos"
+              action-label="▶ Install &amp; Start ZONOS3 (:1919)"
+              action-variant="primary"
+            >
+              <a slot="actions" href="https://huggingface.co/Zyphra/ZONOS3-Mini" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">🤗 ZONOS3</a>
+            </int-select>
+
+            <div id="zonos-progress" class="pull-progress" hidden></div>
+
+            <int-select
+              control-id="voice-select"
+              label="Browser Fallback English Voice"
+              action-id="btn-test-voice"
+              action-label="🔊 Test English Voice"
+              action-variant="secondary"
+            ></int-select>
+            <p id="voice-tools-note" class="muted" style="margin:0;"></p>
+
+            <int-toggle
+              control-id="setting-default-voice"
+              label="🔊 Auto-Speak Interviewer Replies"
+              description="Play voice automatically during calls by default."
+              checked
+            ></int-toggle>
+            <int-toggle
+              control-id="setting-default-continuous"
+              label="💬 Continuous Dialogue Flow Default"
+              description="Keep dialogue natural while placing English upgrades silently in Coach tips."
+              checked
+            ></int-toggle>
+          </int-card>
+        </div>
+
+        <int-card heading="💾 SQLite Persistence &amp; Profile Sync" heading-id="heading-set-save" badge-id="settings-storage-pill" badge-text="data/arena.db">
+          <div class="settings-save-bar">
+            <div class="settings-save-meta">
+              <p id="settings-storage-summary" class="muted" style="margin:0;">All progress, mistakes, and Target Interview packs are stored safely in local SQLite.</p>
+              <span id="settings-save-status" class="settings-save-status" aria-live="polite"></span>
+            </div>
+            <int-button control-id="btn-save-settings" type="submit" variant="green" label="💾 Save Settings &amp; Ready to Train 🚀"></int-button>
+          </div>
+        </int-card>
+      </form>
+    </section>
+  </main>
+
+  <!-- NATIVE MODAL DIALOG: POWER-UP SHOP -->
+  <dialog id="shop-dialog" closedby="any" aria-labelledby="shop-dialog-title">
+    <div class="dialog-header">
+      <h2 id="shop-dialog-title">🛒 Power-Up Shop</h2>
+      <button type="button" class="icon-close" command="close" commandfor="shop-dialog" aria-label="Close Power-Up Shop">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="shop-balance-bar">
+        <span class="shop-balance-pill is-xp">⚡ <strong id="shop-xp-balance">0</strong> XP</span>
+        <span class="shop-balance-pill is-gems">💎 <strong id="shop-gems-balance">0</strong> Gems</span>
+        <span class="shop-balance-pill is-freeze">🛡️ <strong id="shop-freezes-balance">0</strong> Streak Freezes</span>
+      </div>
+      <p id="shop-status-msg" class="shop-status-msg" aria-live="polite">Spend your earned XP points or Gems to unlock interview boosts &amp; streak shields.</p>
+      <div id="shop-items-grid" class="shop-grid"></div>
+    </div>
+    <form method="dialog" class="dialog-footer">
+      <button type="submit" value="done" class="btn btn-secondary">Close Shop</button>
+    </form>
+  </dialog>
+
+  <!-- NATIVE MODAL DIALOG: POST-INTERVIEW 1-10 SCORECARD -->
+  <dialog id="scorecard-dialog" closedby="any" aria-labelledby="scorecard-dialog-title">
+    <div class="dialog-header">
+      <h2 id="scorecard-dialog-title">📊 Top 5% Interview Scorecard</h2>
+      <button type="button" class="icon-close" command="close" commandfor="scorecard-dialog" aria-label="Close scorecard">✕</button>
+    </div>
+    <div id="scorecard-content" class="dialog-body"></div>
+    <form method="dialog" class="dialog-footer">
+      <button type="submit" value="done" class="btn btn-green">Collect XP &amp; Continue 🎉</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

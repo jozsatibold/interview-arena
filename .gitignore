@@ -1,0 +1,14 @@
+# Local runtime database & personal session state
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Cloned/built third-party ZONOS3-Mini TTS runtime & weights
+zonos3/
+
+# OS / editor / temporary artifacts
+.DS_Store
+*.log
+node_modules/
+tmp/

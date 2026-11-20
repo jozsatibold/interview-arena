@@ -1,0 +1,39 @@
+{
+  "pnpm-and-safety-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/security-guard.mjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "syntax-post-edit-check": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/post-edit-lint.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "ticket-end-verify-gate": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./hooks/ticket-stop-gate.mjs",
+        "timeout": 25
+      }
+    ]
+  }
+}

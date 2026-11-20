@@ -1,0 +1,28 @@
+{
+  "name": "interview-coach-arena",
+  "version": "1.0.0",
+  "description": "100% local AI interview simulator, English fluency coach, and timed logic puzzle studio powered by Ollama, ZONOS3-Mini, Whisper, and Node.js SQLite.",
+  "type": "module",
+  "main": "server.mjs",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server.mjs",
+    "check": "node --no-warnings=ExperimentalWarning --check server.mjs logic-puzzles.mjs personalities.mjs role-adapter.mjs server/*.mjs shared/*.mjs app/app.js app/components.js app/modules/*.js scripts/*.mjs tests/*.mjs",
+    "lint": "node --no-warnings=ExperimentalWarning scripts/lint.mjs",
+    "test": "node --no-warnings=ExperimentalWarning --test tests/*.test.mjs",
+    "verify": "pnpm run check && pnpm run lint && pnpm test"
+  },
+  "keywords": [
+    "interview-prep",
+    "ollama",
+    "local-ai",
+    "voice-coach",
+    "english-tutor",
+    "logic-puzzles",
+    "sqlite"
+  ]
+}
