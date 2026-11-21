@@ -242,6 +242,7 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
   const isLogic = s?.mode === 'logic';
   return {
     model,
+    modelContextTier: state.user?.modelContextTier || 'auto',
     mode: s.mode || 'interview',
     guestMode: Boolean(s.guestMode),
     tutorTeacherId: s.tutorTeacherId || null,

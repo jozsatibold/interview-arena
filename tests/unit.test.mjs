@@ -24,8 +24,13 @@ import {
 } from '../personalities.mjs';
 import {
   stripStaticOpenerSection,
-  buildInterviewPacingDirectives
+  buildInterviewPacingDirectives,
+  trimConversationForTier
 } from '../server/pacing.mjs';
+import {
+  detectModelParamBillions,
+  resolveEffectiveContextTier
+} from '../shared/model-tiers.mjs';
 import { detectRoleArchetype, getAdaptedAgents } from '../role-adapter.mjs';
 import { AGENT_META } from '../server/config.mjs';
 
@@ -131,4 +136,31 @@ test('interview pacing enforces warm-up, smooth agenda intro, bridged exploratio
   const p4 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 4, firstName: 'Alex' });
   assert.equal(p4.phase, 'closing');
   assert.ok(/practical alignment/i.test(p4.pacingBlock));
+});
+
+test('LLM size scraper and context tier optimizer classify Small/Medium/Large and trim history', () => {
+  assert.equal(detectModelParamBillions({ name: 'qwen3.5:4b' }).tier, 'small');
+  assert.equal(detectModelParamBillions({ name: 'hf.co/LiquidAI/LFM2.5-2.6B-GGUF' }).tier, 'small');
+  assert.equal(detectModelParamBillions({ name: 'gemma4:e4b' }).tier, 'small');
+  assert.equal(detectModelParamBillions({ name: 'qwen3.5:9b' }).tier, 'medium');
+  assert.equal(detectModelParamBillions({ name: 'qwen3.6:35b-a3b-q8_0' }).tier, 'medium');
+  assert.equal(detectModelParamBillions({ name: 'llama3.3:70b' }).tier, 'large');
+  assert.equal(detectModelParamBillions({ name: 'custom-model', parameterSize: '4.0B' }).source, 'metadata');
+  assert.equal(detectModelParamBillions({ name: 'custom-model', sizeBytes: 4e9 }).tier, 'small');
+
+  const autoSmall = resolveEffectiveContextTier({ preference: 'auto', modelName: 'qwen3.5:4b' });
+  assert.equal(autoSmall.mode, 'auto');
+  assert.equal(autoSmall.tier, 'small');
+  assert.equal(autoSmall.budgets.compactPrompt, true);
+  assert.equal(autoSmall.budgets.maxHistoryMsgs, 6);
+
+  const manualLarge = resolveEffectiveContextTier({ preference: 'large', modelName: 'qwen3.5:4b' });
+  assert.equal(manualLarge.mode, 'manual');
+  assert.equal(manualLarge.tier, 'large');
+  assert.equal(manualLarge.budgets.numCtx, 16384);
+
+  const msgs = Array.from({ length: 10 }, (_, idx) => ({ role: idx % 2 === 0 ? 'assistant' : 'user', content: `Turn ${idx}` }));
+  const trimmed = trimConversationForTier(msgs, 6);
+  assert.equal(trimmed.recentMessages.length, 6);
+  assert.ok(trimmed.earlierSummary.includes('Turn 0'));
 });

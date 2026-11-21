@@ -9,9 +9,12 @@ import {
 import {
   stripStaticOpenerSection,
   buildInterviewPacingDirectives,
+  trimConversationForTier,
+  buildInterviewPrompt,
   TUTOR_PACING_RULE,
   LOGIC_PACING_RULE
 } from './pacing.mjs';
+import { resolveEffectiveContextTier } from '../shared/model-tiers.mjs';
 import { getAdaptedAgents, buildDynamicAgentDirective } from '../role-adapter.mjs';
 import {
   LOGIC_DIFFICULTIES,
@@ -41,6 +44,7 @@ import {
 import {
   COACH_JSON_DELIMITER,
   fetchOllamaChat,
+  getCachedModelMeta,
   consumeNdjsonBody,
   stripThinkBlocks,
   extractJsonSafe,
@@ -471,6 +475,7 @@ ${COACH_JSON_DELIMITER}
 async function resolveChatContext(body, { isFinish = false } = {}) {
   const {
     model = 'qwen3.5:9b',
+    modelContextTier = '',
     mode = 'interview',
     guestMode = false,
     tutorTeacherId = 'tutor-sarah',
@@ -498,14 +503,25 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
 
   const isGuestSession = Boolean(guestMode && (mode === 'tutor' || mode === 'logic'));
   const activeCv = isGuestSession ? null : await getActiveCv();
+  const savedState = modelContextTier ? null : await ensureState();
+  const tierInfo = resolveEffectiveContextTier({
+    preference: modelContextTier || savedState?.modelContextTier || 'auto',
+    modelName: model,
+    modelMeta: getCachedModelMeta(model)
+  });
   const useStaticAgentFile = !isGuestSession && (!activeCv || activeCv.id === 'cv-baseline-1');
   const firstName = isGuestSession
     ? 'Guest'
     : (String(activeCv?.profile?.candidateName || 'there').trim().split(/\s+/)[0] || 'there');
 
-  const normalizedMsgs = (messages || []).map((m) =>
+  const rawNormalizedMsgs = (messages || []).map((m) =>
     m.role === 'user' ? { ...m, content: normalizeInterviewTranscript(m.content) } : m
   );
+  const { recentMessages: normalizedMsgs, earlierSummary } = trimConversationForTier(
+    rawNormalizedMsgs,
+    isFinish ? 24 : tierInfo.budgets.maxHistoryMsgs
+  );
+  const fullUserTurnCount = rawNormalizedMsgs.filter((m) => m.role === 'user').length;
 
   let systemPrompt = '';
   let startPrompt = '';
@@ -586,52 +602,44 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     const rawAgentMd = useStaticAgentFile
       ? stripStaticOpenerSection(await fs.readFile(path.join(ROOT_DIR, 'agents', path.basename(agentFile)), 'utf8'))
       : '';
+    const agentLimit = isFinish ? 2200 : tierInfo.budgets.maxAgentChars;
+    const jdLimit = isFinish ? 1400 : tierInfo.budgets.maxJdChars;
     const agentPrompt = useStaticAgentFile
-      ? summarizeMdPrompt(rawAgentMd, isFinish ? 2200 : 1900)
-      : buildDynamicAgentDirective({ meta, activeCv });
-    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day }, isFinish ? 1400 : 1300);
-    const userTurns = normalizedMsgs.filter((m) => m.role === 'user').length;
+      ? summarizeMdPrompt(rawAgentMd, agentLimit)
+      : summarizeMdPrompt(buildDynamicAgentDirective({ meta, activeCv }), agentLimit);
+    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day }, jdLimit);
     const pacing = buildInterviewPacingDirectives({
       action,
       topic,
-      userTurns,
+      userTurns: fullUserTurnCount,
       firstName,
       avatarName: meta?.avatarName || 'the interviewer',
       personality,
-      openerHint
+      openerHint,
+      compactMode: tierInfo.budgets.compactPrompt
     });
 
     if (!isFinish) {
-      const activeProfilePrompt = activeCv?.profile?.profilePrompt || COMPACT_CANDIDATE_PROFILE;
-      const ndaClause = 'unless the candidate makes a major interview red flag (badmouthing past teams or sharing confidential internal data)';
-      const flowRule = isContinuous
-        ? `CONTINUOUS DIALOGUE MODE: React authentically in your assigned personality to a detail ${firstName} said, bridge smoothly if changing topic, and ask ONE follow-up or next question in 2-4 crisp spoken English sentences. NEVER interrupt with coachPause ${ndaClause}. INSTEAD, whenever ${firstName} says ANY grammar error, non-native phrasing, or awkward B2 wording, put 1-2 immediate fixes in "grammarFixes"!`
-        : `STRICT COACH MODE: If ${firstName} uses plain B2 phrasing, awkward non-native grammar, or shares confidential baselines, output a brief English pause line and populate coachPause with 2 Senior upgrades AND include specific fixes in "grammarFixes".`;
-
-      systemPrompt = `${activeProfilePrompt}
-Interviewer Persona: ${meta?.avatarName || 'Interviewer'} (${meta?.title || topic}).
-${personalityBlock}
-${pacing.pacingBlock}
-${agentPrompt}
-Target Role: ${jdPrompt}
-
-LANGUAGE RULE (CRITICAL): English ONLY everywhere.
-STT TOLERANCE RULE: Fix ASR typos silently — ONLY critique real English grammar/phrasing mistakes!
-
-STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
-1. First, begin IMMEDIATELY with a short 3-7 word proportionally attuned reaction, followed by 1-3 crisp conversational sentences (include a gentle 1-sentence transition bridge whenever introducing a new angle or CV detail; NO markdown, NO emojis, NO bullet points, NO JSON yet).
-2. After the spoken English reply, put exact delimiter on its own line:
-${COACH_JSON_DELIMITER}
-3. Immediately after the delimiter, write ONE compact JSON object in English ONLY:
-{
-  "coachPause": null | {"category":"B2-to-Senior"|"Grammar"|"Non-Native"|"Anti-Freeze"|"NDA-Safety","original":"phrase","reasonHu":"short English explanation","seniorUpgrades":["upgrade 1","upgrade 2"]},
-  "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Non-Native"|"Senior-Tone","said":"exact weak or ungrammatical phrase candidate said","better":"natural C1 Senior phrasing fix","why":"1 concise sentence explaining the fix"}],
-  "microTipHu": null | "1 short vocabulary/delivery tip"
-}
-On EVERY "turn" (not "start"): include 1-2 "grammarFixes" whenever anything grammatical or phrasing-wise can be improved! On "start", set "grammarFixes": [].
-${flowRule}${action === 'turn' && retryOf?.better ? `\n\nRETRY PRACTICE NOTE: ${firstName} clicked "Say It Again" to practice improving "${String(retryOf.said || '').slice(0, 180)}" -> "${String(retryOf.better).slice(0, 240)}". Briefly acknowledge cleanly, then ask your next follow-up.` : ''}`;
-
-      startPrompt = `${pacing.startPrompt}\nThen output ${COACH_JSON_DELIMITER} with empty grammarFixes and null coachPause.`;
+      const activeProfilePrompt = summarizeMdPrompt(
+        activeCv?.profile?.profilePrompt || COMPACT_CANDIDATE_PROFILE,
+        tierInfo.budgets.maxProfileChars
+      );
+      ({ systemPrompt, startPrompt } = buildInterviewPrompt({
+        compactPrompt: tierInfo.budgets.compactPrompt,
+        activeProfilePrompt,
+        meta,
+        topic,
+        firstName,
+        personalityBlock,
+        pacing,
+        earlierSummary,
+        agentPrompt,
+        jdPrompt,
+        delimiter: COACH_JSON_DELIMITER,
+        isContinuous,
+        action,
+        retryOf
+      }));
     } else {
       const coreRules = !useStaticAgentFile
         ? `${activeCv?.profile?.profilePrompt || ''}\n\nFULL CV:\n${summarizeMdPrompt(activeCv?.rawText || '', 3000)}`
@@ -645,7 +653,7 @@ ${flowRule}${action === 'turn' && retryOf?.better ? `\n\nRETRY PRACTICE NOTE: ${
     }
   }
 
-  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, systemPrompt, startPrompt, action };
+  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, systemPrompt, startPrompt, action, tierInfo };
 }
 
 export async function handleChatStream(body, res) {
@@ -655,11 +663,17 @@ export async function handleChatStream(body, res) {
     chatMessages.push({ role: 'user', content: ctx.startPrompt });
   }
 
+  const budgets = ctx.tierInfo?.budgets || { numCtx: 8192, numPredict: 380, repeatPenalty: 1.05 };
   const ollamaRes = await fetchOllamaChat({
     model: ctx.model,
     messages: chatMessages,
     stream: true,
-    options: { temperature: 0.45, num_predict: 380 }
+    options: {
+      temperature: 0.45,
+      num_ctx: budgets.numCtx,
+      num_predict: budgets.numPredict,
+      repeat_penalty: budgets.repeatPenalty
+    }
   });
 
   res.writeHead(200, {

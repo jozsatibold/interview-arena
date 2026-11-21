@@ -152,6 +152,37 @@
                 action-variant="primary"
               ></int-select>
               <div id="onb-pull-progress" class="pull-progress" hidden></div>
+
+              <div class="context-tier-box" data-context-tier-picker>
+                <div class="context-tier-head">
+                  <div class="context-tier-title-wrap">
+                    <span class="context-tier-title">Context Optimization</span>
+                    <button type="button" class="tier-info-btn" aria-expanded="false" aria-label="Explain LLM context optimization" title="What does this do?">ℹ️</button>
+                  </div>
+                  <span class="badge tier-resolved-badge">Auto</span>
+                </div>
+                <div class="tier-info-popover" hidden>
+                  Higher context tiers keep more CV/JD detail and longer conversation memory for richer, higher-quality interview depth (best with 9B+ models; Small 1B–8B models stay faster and more focused on compact context). Set a tier manually anytime, or leave <strong>Auto</strong> to detect size from Ollama metadata or the model name.
+                </div>
+                <div class="tier-seg-grid" role="radiogroup" aria-label="LLM Context Optimization Tier">
+                  <button type="button" class="tier-seg-btn" data-tier-value="auto" aria-pressed="true">
+                    <strong>✨ Auto</strong>
+                    <small class="tier-auto-hint">Detect size</small>
+                  </button>
+                  <button type="button" class="tier-seg-btn" data-tier-value="small" aria-pressed="false">
+                    <strong>⚡ Small LLMs</strong>
+                    <small>(1B–8B)</small>
+                  </button>
+                  <button type="button" class="tier-seg-btn" data-tier-value="medium" aria-pressed="false">
+                    <strong>🧠 Medium LLMs</strong>
+                    <small>(9B–35B)</small>
+                  </button>
+                  <button type="button" class="tier-seg-btn" data-tier-value="large" aria-pressed="false">
+                    <strong>🏔️ Large LLMs</strong>
+                    <small>(36B+)</small>
+                  </button>
+                </div>
+              </div>
             </int-card>
 
             <int-card heading="🎙️ 2. Neural Voice (ZONOS3-Mini)" heading-id="heading-onb-zonos" badge-id="onb-zonos-badge" badge-text="Optional" card-class="onb-setup-card">
@@ -835,6 +866,37 @@
               action-label="⬇ Pull Selected"
               action-variant="secondary"
             ></int-select>
+
+            <div class="context-tier-box" data-context-tier-picker>
+              <div class="context-tier-head">
+                <div class="context-tier-title-wrap">
+                  <span class="context-tier-title">Context Optimization</span>
+                  <button type="button" class="tier-info-btn" aria-expanded="false" aria-label="Explain LLM context optimization" title="What does this do?">ℹ️</button>
+                </div>
+                <span class="badge tier-resolved-badge">Auto</span>
+              </div>
+              <div class="tier-info-popover" hidden>
+                Higher context tiers keep more CV/JD detail and longer conversation memory for richer, higher-quality interview depth (best with 9B+ models; Small 1B–8B models stay faster and more focused on compact context). Set a tier manually anytime, or leave <strong>Auto</strong> to detect size from Ollama metadata or the model name.
+              </div>
+              <div class="tier-seg-grid" role="radiogroup" aria-label="LLM Context Optimization Tier">
+                <button type="button" class="tier-seg-btn" data-tier-value="auto" aria-pressed="true">
+                  <strong>✨ Auto</strong>
+                  <small class="tier-auto-hint">Detect size</small>
+                </button>
+                <button type="button" class="tier-seg-btn" data-tier-value="small" aria-pressed="false">
+                  <strong>⚡ Small LLMs</strong>
+                  <small>(1B–8B)</small>
+                </button>
+                <button type="button" class="tier-seg-btn" data-tier-value="medium" aria-pressed="false">
+                  <strong>🧠 Medium LLMs</strong>
+                  <small>(9B–35B)</small>
+                </button>
+                <button type="button" class="tier-seg-btn" data-tier-value="large" aria-pressed="false">
+                  <strong>🏔️ Large LLMs</strong>
+                  <small>(36B+)</small>
+                </button>
+              </div>
+            </div>
 
             <int-field
               control-id="custom-model-input"

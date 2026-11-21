@@ -1,4 +1,5 @@
 import { OLLAMA_BASE } from './config.mjs';
+import { detectModelParamBillions } from '../shared/model-tiers.mjs';
 
 export function stripThinkBlocks(rawText) {
   return String(rawText || '')
@@ -96,6 +97,12 @@ export async function fetchOllamaChat(payload, timeoutMs = 0) {
   return res;
 }
 
+let cachedInventoryByName = new Map();
+
+export function getCachedModelMeta(modelName = '') {
+  return cachedInventoryByName.get(String(modelName || '').trim()) || null;
+}
+
 export async function getOllamaTagInventory() {
   let ollamaRunning = false;
   let installedModels = [];
@@ -105,10 +112,23 @@ export async function getOllamaTagInventory() {
     if (resp.ok) {
       const data = await resp.json();
       ollamaRunning = true;
-      installedModels = (data.models || []).map((m) => ({
-        name: m.name,
-        sizeGB: m.size ? (m.size / 1e9).toFixed(1) : '?'
-      }));
+      installedModels = (data.models || []).map((m) => {
+        const detected = detectModelParamBillions({
+          name: m.name,
+          parameterSize: m.details?.parameter_size || '',
+          sizeBytes: m.size || 0
+        });
+        return {
+          name: m.name,
+          sizeGB: m.size ? (m.size / 1e9).toFixed(1) : '?',
+          sizeBytes: m.size || 0,
+          parameterSize: m.details?.parameter_size || '',
+          detectedTier: detected.tier,
+          detectedParamB: detected.paramB,
+          detectionSource: detected.source
+        };
+      });
+      cachedInventoryByName = new Map(installedModels.map((item) => [item.name, item]));
     } else {
       ollamaError = `HTTP ${resp.status}`;
     }

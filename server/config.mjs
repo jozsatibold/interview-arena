@@ -504,6 +504,7 @@ export const DEFAULT_STATE = {
   lastPracticeDate: null,
   streakFreezes: 2,
   selectedModel: 'lfm2.5:8b',
+  modelContextTier: 'auto',
   plannerModel: '',
   visionModel: '',
   preferredVoice: '',

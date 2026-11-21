@@ -14,6 +14,7 @@ import {
 import { getDb, getActiveCv } from './db.mjs';
 import { getOllamaTagInventory, pickRecommendedPlannerModels, pickVisionModels } from './ollama.mjs';
 import { normalizeInterviewTranscript } from '../shared/transcript.mjs';
+import { detectModelParamBillions, LLM_CONTEXT_TIERS } from '../shared/model-tiers.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -312,7 +313,16 @@ export async function getSetupStatus() {
     ollamaError: ollamaTagInfo.ollamaError,
     ollamaDownloadUrl: 'https://ollama.com/download',
     installedModels: ollamaTagInfo.installedModels,
-    recommendedModels: RECOMMENDED_MODELS,
+    recommendedModels: RECOMMENDED_MODELS.map((r) => {
+      const detected = detectModelParamBillions({ name: r.id, sizeGB: parseFloat(r.sizeHint) || null });
+      return {
+        ...r,
+        detectedTier: detected.tier,
+        detectedParamB: detected.paramB,
+        detectionSource: detected.source
+      };
+    }),
+    contextTiers: LLM_CONTEXT_TIERS,
     plannerModels: pickRecommendedPlannerModels(ollamaTagInfo.installedModels),
     visionModels: pickVisionModels(ollamaTagInfo.installedModels),
     zonosRunning,

@@ -1,4 +1,5 @@
 import { apiJson, esc, fillSelectOptions, saveUserState, consumeNdjsonStream } from '../components.js';
+import { resolveEffectiveContextTier } from '/shared/model-tiers.mjs';
 import { $, $$, state, getCandidateIdentity, syncLinkedSelectGroup } from './state.js';
 import { updateAvatarStage } from './avatar.js';
 import { populateZonosVoiceDropdowns, speakEnglish } from './voice-media.js';
@@ -134,6 +135,53 @@ export function renderHome() {
   }
 }
 
+function findSetupModelMeta(modelName = '') {
+  const s = state.setup;
+  if (!s || !modelName) return null;
+  return (
+    (s.installedModels || []).find((m) => m.name === modelName) ||
+    (s.recommendedModels || []).find((r) => r.id === modelName) ||
+    null
+  );
+}
+
+export function syncContextTierPickers(modelOverride = '') {
+  const pref = state.user?.modelContextTier || 'auto';
+  const activeModel =
+    String(modelOverride || '').trim() ||
+    $('#custom-model-input')?.value.trim() ||
+    $('#model-select')?.value ||
+    $('#onb-setup-model-select')?.value ||
+    state.user?.selectedModel ||
+    '';
+  const resolved = resolveEffectiveContextTier({
+    preference: pref,
+    modelName: activeModel,
+    modelMeta: findSetupModelMeta(activeModel)
+  });
+  const paramSuffix = resolved.detected?.paramB ? ` (${resolved.detected.paramB}B)` : '';
+  const autoTargetLabel = `→ ${resolved.spec.title.replace(' LLMs', '')}${paramSuffix}`;
+
+  for (const box of $$('[data-context-tier-picker]')) {
+    const badge = box.querySelector('.tier-resolved-badge');
+    if (badge) {
+      badge.textContent =
+        resolved.mode === 'auto'
+          ? `Auto → ${resolved.spec.title} (${resolved.spec.rangeLabel})`
+          : `${resolved.spec.title} (${resolved.spec.rangeLabel})`;
+      badge.className = `badge tier-resolved-badge ${resolved.tier === 'small' ? '' : 'badge-green'}`;
+    }
+    const autoHint = box.querySelector('.tier-auto-hint');
+    if (autoHint) autoHint.textContent = autoTargetLabel;
+
+    for (const btn of box.querySelectorAll('.tier-seg-btn')) {
+      const isSelected = btn.dataset.tierValue === resolved.preference;
+      btn.classList.toggle('is-active', isSelected);
+      btn.setAttribute('aria-pressed', String(isSelected));
+    }
+  }
+}
+
 function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
   const onbChecklist = $('#onb-setup-checklist');
   if (onbChecklist) {
@@ -244,6 +292,7 @@ export function renderSettingsPage() {
   if (s.visionModels?.length) state.visionModels = s.visionModels;
   renderTargetModelSelectors();
   renderOnboardingSetupState(s, tiles, chatModelOptions, isReady);
+  syncContextTierPickers();
 
   if ($('#voice-tools-note')) {
     $('#voice-tools-note').textContent = `${s.voiceTools.browserSpeechNote}` +
@@ -409,10 +458,36 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
   syncLinkedSelectGroup(['#settings-planner-model', '#planner-model-select', '#cv-planner-model', '#onb-planner-model']);
   syncLinkedSelectGroup(['#settings-vision-model', '#vision-model-select']);
 
+  for (const box of $$('[data-context-tier-picker]')) {
+    const infoBtn = box.querySelector('.tier-info-btn');
+    const popover = box.querySelector('.tier-info-popover');
+    infoBtn?.addEventListener('click', () => {
+      if (!popover) return;
+      const nextHidden = !popover.hidden;
+      popover.hidden = nextHidden;
+      infoBtn.setAttribute('aria-expanded', String(!nextHidden));
+    });
+    for (const btn of box.querySelectorAll('.tier-seg-btn')) {
+      btn.addEventListener('click', async () => {
+        const nextTier = btn.dataset.tierValue || 'auto';
+        if (state.user) state.user.modelContextTier = nextTier;
+        syncContextTierPickers();
+        try {
+          state.user = await saveUserState({ modelContextTier: nextTier });
+        } catch {}
+      });
+    }
+  }
+
+  $('#model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
+  $('#onb-setup-model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
+  $('#custom-model-input')?.addEventListener('input', (e) => syncContextTierPickers(e.target.value));
+
   $('#settings-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     state.user = await saveUserState({
       selectedModel: $('#custom-model-input')?.value.trim() || $('#model-select')?.value,
+      modelContextTier: state.user?.modelContextTier || 'auto',
       plannerModel: $('#settings-planner-model')?.value || $('#planner-model-select')?.value || '',
       visionModel: $('#settings-vision-model')?.value || $('#vision-model-select')?.value || '',
       preferredVoice: $('#voice-select')?.value || '',

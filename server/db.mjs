@@ -39,6 +39,7 @@ export function getDb() {
       last_practice_date TEXT,
       streak_freezes INTEGER NOT NULL DEFAULT 2,
       selected_model TEXT NOT NULL DEFAULT 'lfm2.5:8b',
+      model_context_tier TEXT NOT NULL DEFAULT 'auto',
       planner_model TEXT NOT NULL DEFAULT '',
       vision_model TEXT NOT NULL DEFAULT '',
       preferred_voice TEXT NOT NULL DEFAULT '',
@@ -140,6 +141,7 @@ export function getDb() {
   if (!cols.has('vision_model')) db.exec("ALTER TABLE user_profile ADD COLUMN vision_model TEXT NOT NULL DEFAULT ''");
   if (!cols.has('default_auto_speak')) db.exec('ALTER TABLE user_profile ADD COLUMN default_auto_speak INTEGER NOT NULL DEFAULT 1');
   if (!cols.has('default_continuous_flow')) db.exec('ALTER TABLE user_profile ADD COLUMN default_continuous_flow INTEGER NOT NULL DEFAULT 1');
+  if (!cols.has('model_context_tier')) db.exec("ALTER TABLE user_profile ADD COLUMN model_context_tier TEXT NOT NULL DEFAULT 'auto'");
 
   const cvCols = new Set(db.prepare('PRAGMA table_info(cv_versions)').all().map((c) => c.name));
   if (!cvCols.has('generated_jds_json')) db.exec("ALTER TABLE cv_versions ADD COLUMN generated_jds_json TEXT NOT NULL DEFAULT '[]'");
@@ -175,9 +177,9 @@ export function writeFullStateSync(db, state) {
     db.prepare(`
       INSERT INTO user_profile (
         id, xp, gems, streak, last_practice_date, streak_freezes,
-        selected_model, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
+        selected_model, model_context_tier, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
         default_auto_speak, default_continuous_flow, power_ups_json, completed_days_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         xp = excluded.xp,
         gems = excluded.gems,
@@ -185,6 +187,7 @@ export function writeFullStateSync(db, state) {
         last_practice_date = excluded.last_practice_date,
         streak_freezes = excluded.streak_freezes,
         selected_model = excluded.selected_model,
+        model_context_tier = excluded.model_context_tier,
         planner_model = excluded.planner_model,
         vision_model = excluded.vision_model,
         preferred_voice = excluded.preferred_voice,
@@ -201,6 +204,7 @@ export function writeFullStateSync(db, state) {
       state.lastPracticeDate ?? null,
       Number(state.streakFreezes ?? 2),
       String(state.selectedModel || 'lfm2.5:8b'),
+      String(state.modelContextTier || 'auto'),
       String(state.plannerModel || ''),
       String(state.visionModel || ''),
       String(state.preferredVoice || ''),
@@ -324,6 +328,7 @@ export async function ensureState() {
     lastPracticeDate: row.last_practice_date,
     streakFreezes: row.streak_freezes,
     selectedModel: row.selected_model,
+    modelContextTier: row.model_context_tier || 'auto',
     plannerModel: row.planner_model || '',
     visionModel: row.vision_model || '',
     preferredVoice: row.preferred_voice,

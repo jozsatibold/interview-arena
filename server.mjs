@@ -111,6 +111,7 @@ function parseCheatsheet(md) {
 
 function applyStatePatch(state, patch) {
   if (patch.selectedModel) state.selectedModel = patch.selectedModel;
+  if (['auto', 'small', 'medium', 'large'].includes(patch.modelContextTier)) state.modelContextTier = patch.modelContextTier;
   if (patch.plannerModel !== undefined) state.plannerModel = patch.plannerModel;
   if (patch.visionModel !== undefined) state.visionModel = patch.visionModel;
   if (patch.preferredVoice !== undefined) state.preferredVoice = patch.preferredVoice;
