@@ -107,33 +107,37 @@ export async function getOllamaTagInventory() {
   let ollamaRunning = false;
   let installedModels = [];
   let ollamaError = null;
-  try {
-    const resp = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(2000) });
-    if (resp.ok) {
-      const data = await resp.json();
-      ollamaRunning = true;
-      installedModels = (data.models || []).map((m) => {
-        const detected = detectModelParamBillions({
-          name: m.name,
-          parameterSize: m.details?.parameter_size || '',
-          sizeBytes: m.size || 0
+  const bases = [...new Set([OLLAMA_BASE, 'http://127.0.0.1:11434', 'http://localhost:11434'])];
+  for (const base of bases) {
+    try {
+      const resp = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) {
+        const data = await resp.json();
+        ollamaRunning = true;
+        ollamaError = null;
+        installedModels = (data.models || []).map((m) => {
+          const detected = detectModelParamBillions({
+            name: m.name,
+            parameterSize: m.details?.parameter_size || '',
+            sizeBytes: m.size || 0
+          });
+          return {
+            name: m.name,
+            sizeGB: m.size ? (m.size / 1e9).toFixed(1) : '?',
+            sizeBytes: m.size || 0,
+            parameterSize: m.details?.parameter_size || '',
+            detectedTier: detected.tier,
+            detectedParamB: detected.paramB,
+            detectionSource: detected.source
+          };
         });
-        return {
-          name: m.name,
-          sizeGB: m.size ? (m.size / 1e9).toFixed(1) : '?',
-          sizeBytes: m.size || 0,
-          parameterSize: m.details?.parameter_size || '',
-          detectedTier: detected.tier,
-          detectedParamB: detected.paramB,
-          detectionSource: detected.source
-        };
-      });
-      cachedInventoryByName = new Map(installedModels.map((item) => [item.name, item]));
-    } else {
+        cachedInventoryByName = new Map(installedModels.map((item) => [item.name, item]));
+        break;
+      }
       ollamaError = `HTTP ${resp.status}`;
+    } catch (err) {
+      ollamaError = err.message;
     }
-  } catch (err) {
-    ollamaError = err.message;
   }
   return { ollamaRunning, installedModels, ollamaError };
 }
@@ -158,9 +162,9 @@ export function pickRecommendedPlannerModels(installedModels) {
 
 export function pickVisionModels(installedModels) {
   return installedModels
-    .filter((m) => /vl|vision|gemma4|clef/i.test(m.name))
+    .filter((m) => /vl|vision|llava|minicpm-v|moondream|gemma3|gemma4|qwen3\.5|clef/i.test(m.name))
     .sort((a, b) => {
-      const weight = (n) => (/qwen3-vl/i.test(n) ? 3 : /gemma4/i.test(n) ? 2 : 1);
+      const weight = (n) => (/qwen3-vl|vl\b/i.test(n) ? 4 : /vision|llava|clef/i.test(n) ? 3 : /gemma4|gemma3/i.test(n) ? 2 : 1);
       return weight(b.name) - weight(a.name);
     });
 }

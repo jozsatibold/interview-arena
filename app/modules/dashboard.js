@@ -27,16 +27,26 @@ export function renderActiveFakeJobPreview() {
 }
 
 export function renderTargetModelSelectors() {
-  const models = state.plannerModels.length ? state.plannerModels : (state.setup?.installedModels || []);
-  const vModels = state.visionModels.length ? state.visionModels : (state.setup?.installedModels || []);
+  const recFallback = (state.setup?.recommendedModels || []).map((r) => ({ name: r.id, sizeGB: r.sizeHint || '?' }));
+  const installedNonEmbed = (state.setup?.installedModels || []).filter((m) => !/embed|flux/i.test(m.name));
+  const models = state.plannerModels.length
+    ? state.plannerModels
+    : installedNonEmbed.length
+      ? installedNonEmbed
+      : recFallback;
+  const vModels = state.visionModels.length
+    ? state.visionModels
+    : installedNonEmbed.length
+      ? installedNonEmbed
+      : [{ name: 'qwen3-vl:8b', sizeGB: '~6.1 GB (Pull Recommended)' }];
   const plannerPref = $('#planner-model-select')?.value || state.user?.plannerModel || models[0]?.name || '';
   const visionPref = $('#vision-model-select')?.value || state.user?.visionModel || vModels[0]?.name || '';
 
   for (const sel of [$('#planner-model-select'), $('#settings-planner-model'), $('#cv-planner-model'), $('#onb-planner-model')]) {
-    fillSelectOptions(sel, models, { selectedValue: plannerPref, getValue: (m) => m.name, getLabel: (m) => `${m.name} (${m.sizeGB} GB)` });
+    fillSelectOptions(sel, models, { selectedValue: plannerPref, getValue: (m) => m.name, getLabel: (m) => `${m.name} (${m.sizeGB}${String(m.sizeGB).includes('GB') ? '' : ' GB'})` });
   }
   for (const sel of [$('#vision-model-select'), $('#settings-vision-model')]) {
-    fillSelectOptions(sel, vModels, { selectedValue: visionPref, getValue: (m) => m.name, getLabel: (m) => `${m.name} (${m.sizeGB} GB)` });
+    fillSelectOptions(sel, vModels, { selectedValue: visionPref, getValue: (m) => m.name, getLabel: (m) => `${m.name} (${m.sizeGB}${String(m.sizeGB).includes('GB') ? '' : ' GB'})` });
   }
 }
 

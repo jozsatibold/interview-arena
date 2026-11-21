@@ -1,6 +1,6 @@
 import { esc, consumeNdjsonStream, saveUserState } from '../components.js';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
-import { getActiveAgentMeta, rollAppearance, inferVoiceGender, renderAvatarVisual, updateAvatarStage, setAvatarState } from './avatar.js';
+import { getActiveAgentMeta, rollAppearance, rollOfficeBackdrop, inferVoiceGender, renderAvatarVisual, updateAvatarStage, setAvatarState } from './avatar.js';
 import { populateZonosVoiceDropdowns, stopAllSpeech, enqueueSpeakSentence, speakEnglish, syncVideoStreams, toggleCamera, stopMediaStream, upsertLiveDraftBubble } from './voice-media.js';
 import { setScratchpadOpen, stopLogicTimer, startLogicTimer, renderTutorPin, updateScratchpadSyncPill, renderScratchpadForPuzzle, wireScratchpadEvents } from './scratchpad.js';
 import { renderHud, showScorecardDialog, renderStats, renderMistakes } from './stats-shop.js';
@@ -179,9 +179,11 @@ export async function startSession(cfg) {
         glasses: cfg.tutorTeacher?.glasses || 'none',
         headset: cfg.tutorTeacher?.headset || 'none',
         tie: false,
+        smileMood: 'smile',
         hairColor: { hairA: cfg.tutorTeacher?.palette?.hairA, hairB: cfg.tutorTeacher?.palette?.hairB },
         eyeColor: { id: 'warm', iris: cfg.tutorTeacher?.palette?.iris || '#4d6b43', ring: cfg.tutorTeacher?.palette?.ring || '#2d4226' },
         ...(cfg.tutorTeacher?.palette || {}),
+        ...rollOfficeBackdrop(),
         sig: cfg.tutorTeacher?.id || 'tutor'
       }
     : rollAppearance(meta, personality, inferVoiceGender(voice)));

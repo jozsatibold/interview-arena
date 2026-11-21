@@ -1384,26 +1384,61 @@
   }
 
   .lobby-avatar-box {
-    min-block-size: 170px;
-    max-block-size: 215px;
+    container-type: size;
+    min-block-size: 215px;
+    max-block-size: 255px;
     aspect-ratio: auto;
+    align-items: end;
+    justify-items: center;
+    padding: 0;
   }
 
   .lobby-avatar-box .avatar-mount {
-    inline-size: 175px;
-    block-size: 175px;
+    position: relative;
+    z-index: 2;
+    inline-size: min(92cqi, 94cqb);
+    block-size: min(92cqi, 94cqb);
   }
 
   @media (min-width: 768px) {
     .lobby-avatar-box {
-      min-block-size: 215px;
-      max-block-size: 235px;
+      min-block-size: 245px;
+      max-block-size: 275px;
+      padding: 0;
     }
 
     .lobby-avatar-box .avatar-mount {
-      inline-size: 205px;
-      block-size: 205px;
+      inline-size: min(92cqi, 94cqb);
+      block-size: min(92cqi, 94cqb);
     }
+  }
+
+  .stage-office-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-size: cover;
+    background-position: center bottom;
+    filter: blur(3.2px) brightness(0.92);
+    transform: scale(1.08);
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .stage-office-bg.is-flipped {
+    transform: scale(1.08) scaleX(-1);
+  }
+
+  .stage-desk-edge {
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: 0;
+    block-size: 11.5%;
+    z-index: 3;
+    background: linear-gradient(180deg, var(--desk-top, #d7b892) 0%, var(--desk-front, #b89468) 100%);
+    border-block-start: 1.5px solid rgba(255, 255, 255, 0.34);
+    box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.26);
+    pointer-events: none;
   }
 
   .avatar-meta {
@@ -3289,6 +3324,7 @@
     position: relative;
     flex: 1 1 auto;
     min-block-size: 0;
+    container-type: size;
     border-radius: 16px;
     overflow: hidden;
     display: grid;
@@ -3305,10 +3341,20 @@
   .call-avatar-mount {
     position: relative;
     z-index: 2;
-    inline-size: min(290px, 40dvb);
-    block-size: min(290px, 40dvb);
+    align-self: end;
+    margin-block-end: 0;
+    inline-size: min(92cqi, 78cqb);
+    block-size: min(92cqi, 78cqb);
     transition: opacity 0.25s ease-out, transform 0.35s ease-out;
     transition-timing-function: ease-out, var(--spring-easing);
+  }
+
+  @media (min-width: 960px) {
+    .call-avatar-mount {
+      inline-size: min(74cqi, 92cqb);
+      block-size: min(74cqi, 92cqb);
+      margin-block-end: 0;
+    }
   }
 
   /* On-Video Tips Overlay */
@@ -3524,7 +3570,7 @@
     padding: 0.24rem 0.6rem;
     border-radius: 999px;
     font-size: 0.72rem;
-    z-index: 3;
+    z-index: 5;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3712,8 +3758,8 @@
 
   .voice-rings span {
     position: absolute;
-    inline-size: 175px;
-    block-size: 175px;
+    inline-size: min(55cqi, 60cqb);
+    block-size: min(55cqi, 60cqb);
     border-radius: 50%;
     border: 3px solid rgba(56, 189, 248, 0.5);
     opacity: 0;
