@@ -382,6 +382,48 @@ export const PERSONALITY_DIMENSIONS = [
         tip: 'Think aloud clearly—the conversation flows smoothly from thread to thread.'
       }
     ]
+  },
+  {
+    key: 'humor',
+    label: 'Humor',
+    emoji: '😄',
+    options: [
+      {
+        id: 'straightforward-earnest',
+        label: 'Earnest & Straight',
+        hint: 'Focused, minimal joking',
+        clause: 'earnest and straightforward with minimal joking, keeping the tone politely serious',
+        tip: 'Keep humor subtle and stay grounded on clear facts and impact.'
+      },
+      {
+        id: 'occasional-smile',
+        label: 'Light Smile',
+        hint: 'Occasional gentle warmth/humor',
+        clause: 'mostly grounded with an occasional warm chuckle or lighthearted aside when relatable',
+        tip: 'A brief natural smile goes far—keep answers clear and genuine.'
+      },
+      {
+        id: 'dry-wit',
+        label: 'Dry Wit',
+        hint: 'Subtle deadpan observations',
+        clause: 'inclined toward subtle dry wit and understated observations without overacting',
+        tip: 'Appreciate understated jokes cleanly and stay composed.'
+      },
+      {
+        id: 'lighthearted-playful',
+        label: 'Playfully Casual',
+        hint: 'Cracks friendly relatable jokes',
+        clause: 'playfully informal and cheerful, happily cracking a quick relatable joke or funny side-remark during warm-ups and transitions',
+        tip: 'Laugh or smile briefly along with their joke, then steer smoothly back to your point.'
+      },
+      {
+        id: 'witty-banter',
+        label: 'Jokester & Unfiltered',
+        hint: 'Slightly informal, actually tells jokes',
+        clause: 'a charmingly casual, slightly unstructured interviewer who actually tells short dev/work jokes, funny asides, and candid remarks rather than sticking to stiff corporate polish',
+        tip: 'Stay warm, composed, and concise even when the interviewer goes off-script with jokes—pivot gracefully back to senior value.'
+      }
+    ]
   }
 ];
 
@@ -407,7 +449,8 @@ export const FIXED_TUTOR_PERSONALITY = {
     energy: 'pleasant-steady',
     focusLens: 'team-collaboration',
     feedbackStyle: 'warm-affirming',
-    adaptability: 'organic-conversational'
+    adaptability: 'organic-conversational',
+    humor: 'lighthearted-playful'
   },
   prompt:
     'FIXED PERSONALITY (Patient & Helpful Teacher): Be genuinely patient, warm, unhurried, and constructively helpful. Give the learner comfortable space to express ideas without rushing or intimidating them, explain grammar nuances gently in plain everyday English, and transition smoothly between conversational threads.'
@@ -433,7 +476,8 @@ export const FIXED_LOGIC_PERSONALITY = {
     energy: 'pleasant-steady',
     focusLens: 'practical-execution',
     feedbackStyle: 'reflective-paraphrasing',
-    adaptability: 'guided-flexible'
+    adaptability: 'guided-flexible',
+    humor: 'occasional-smile'
   },
   prompt:
     'FIXED PERSONALITY (Balanced / Average Analytical Partner): Maintain a steady, balanced, middle-of-the-road human demeanor—neither overly bubbly nor cold, neither rushed nor passive. Guide calmly step by step with proportional, grounded feedback and natural pacing.'
@@ -497,9 +541,9 @@ export function buildPersonalityFromTraits(topic = 'HR', traitOverrides = null, 
     meta.trapHint ||
     `${resolved.patience.tip} ${resolved.focusLens.tip}`.trim();
 
-  // Compact 3-sentence behavioral fingerprint for small local LLMs (avoids 10-bullet overload)
+  // Compact 3-sentence behavioral fingerprint for small local LLMs (avoids multi-bullet overload)
   const prompt = [
-    `Tone & Demeanor: You are ${resolved.warmth.clause}, ${resolved.energy.clause}, and ${resolved.formality.clause}.`,
+    `Tone, Humor & Demeanor: You are ${resolved.warmth.clause}, ${resolved.energy.clause}, ${resolved.humor.clause}, and ${resolved.formality.clause}.`,
     `Pacing & Reactions: You are ${resolved.patience.clause}, ${resolved.pacing.clause}, ${resolved.feedbackStyle.clause}.`,
     `Interview Lens & Follow-Ups: You are ${resolved.probingDepth.clause}, ${resolved.skepticism.clause}, ${resolved.focusLens.clause}, while ${resolved.adaptability.clause}.`
   ].join(' ');
@@ -540,7 +584,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'upbeat-lively',
         focusLens: 'team-collaboration',
         feedbackStyle: 'warm-affirming',
-        adaptability: 'organic-conversational'
+        adaptability: 'organic-conversational',
+        humor: 'lighthearted-playful'
       }
     },
     {
@@ -557,7 +602,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'engaged-attentive',
         focusLens: 'big-picture-context',
         feedbackStyle: 'reflective-paraphrasing',
-        adaptability: 'guided-flexible'
+        adaptability: 'guided-flexible',
+        humor: 'occasional-smile'
       }
     },
     {
@@ -574,7 +620,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'calm-grounded',
         focusLens: 'measurable-outcomes',
         feedbackStyle: 'thoughtful-summarizer',
-        adaptability: 'agenda-guided'
+        adaptability: 'agenda-guided',
+        humor: 'straightforward-earnest'
       }
     }
   ],
@@ -593,7 +640,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'pleasant-steady',
         focusLens: 'team-collaboration',
         feedbackStyle: 'reflective-paraphrasing',
-        adaptability: 'answer-anchored'
+        adaptability: 'answer-anchored',
+        humor: 'lighthearted-playful'
       }
     },
     {
@@ -610,7 +658,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'engaged-attentive',
         focusLens: 'measurable-outcomes',
         feedbackStyle: 'candid-balanced',
-        adaptability: 'guided-flexible'
+        adaptability: 'guided-flexible',
+        humor: 'dry-wit'
       }
     }
   ],
@@ -629,7 +678,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'engaged-attentive',
         focusLens: 'practical-execution',
         feedbackStyle: 'reflective-paraphrasing',
-        adaptability: 'answer-anchored'
+        adaptability: 'answer-anchored',
+        humor: 'witty-banter'
       }
     },
     {
@@ -646,7 +696,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'calm-grounded',
         focusLens: 'reliability-ownership',
         feedbackStyle: 'thoughtful-summarizer',
-        adaptability: 'guided-flexible'
+        adaptability: 'guided-flexible',
+        humor: 'dry-wit'
       }
     }
   ],
@@ -665,7 +716,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'pleasant-steady',
         focusLens: 'practical-execution',
         feedbackStyle: 'brief-affirming',
-        adaptability: 'answer-anchored'
+        adaptability: 'answer-anchored',
+        humor: 'lighthearted-playful'
       }
     }
   ],
@@ -684,7 +736,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'calm-grounded',
         focusLens: 'reliability-ownership',
         feedbackStyle: 'candid-balanced',
-        adaptability: 'organic-conversational'
+        adaptability: 'organic-conversational',
+        humor: 'dry-wit'
       }
     }
   ],
@@ -703,7 +756,8 @@ const PRESET_TRAITS_BY_TOPIC = {
         energy: 'calm-grounded',
         focusLens: 'big-picture-context',
         feedbackStyle: 'candid-balanced',
-        adaptability: 'agenda-guided'
+        adaptability: 'agenda-guided',
+        humor: 'straightforward-earnest'
       }
     }
   ]

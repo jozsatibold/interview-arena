@@ -1,5 +1,5 @@
 import { apiJson, esc, fillSelectOptions, saveUserState, consumeNdjsonStream } from '../components.js';
-import { resolveEffectiveContextTier } from '/shared/model-tiers.mjs';
+import { resolveEffectiveContextTier, LLM_CONTEXT_TIERS } from '/shared/model-tiers.mjs';
 import { $, $$, state, getCandidateIdentity, syncLinkedSelectGroup } from './state.js';
 import { updateAvatarStage } from './avatar.js';
 import { populateZonosVoiceDropdowns, speakEnglish } from './voice-media.js';
@@ -159,8 +159,9 @@ export function syncContextTierPickers(modelOverride = '') {
     modelName: activeModel,
     modelMeta: findSetupModelMeta(activeModel)
   });
+  const detectedSpec = LLM_CONTEXT_TIERS[resolved.detected?.tier || 'medium'] || resolved.spec;
   const paramSuffix = resolved.detected?.paramB ? ` (${resolved.detected.paramB}B)` : '';
-  const autoTargetLabel = `→ ${resolved.spec.title.replace(' LLMs', '')}${paramSuffix}`;
+  const autoTargetLabel = `→ ${detectedSpec.title.replace(' LLMs', '')}${paramSuffix}`;
 
   for (const box of $$('[data-context-tier-picker]')) {
     const badge = box.querySelector('.tier-resolved-badge');
@@ -202,16 +203,19 @@ function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
   });
 
   if ($('#onb-zonos-badge')) {
-    $('#onb-zonos-badge').textContent = s.zonosRunning ? 'Running ✅' : 'Optional';
+    $('#onb-zonos-badge').textContent = s.zonosRunning ? 'Running ✅' : s.zonosBuilt ? 'Installed · Stopped' : 'Optional';
     $('#onb-zonos-badge').className = `badge ${s.zonosRunning ? 'badge-green' : ''}`;
   }
   if ($('#onb-zonos-status')) {
     $('#onb-zonos-status').textContent = s.zonosRunning
       ? '✅ ZONOS3-Mini Natural 44.1 kHz Voice is active on :1919!'
-      : 'Offline — click below to install/start ZONOS3-Mini locally, or continue with built-in Browser Voice.';
+      : s.zonosBuilt
+        ? '✅ ZONOS3-Mini is already installed locally — click below to start the server on :1919 (or use Browser Voice).'
+        : 'Not installed yet — click below to download & build ZONOS3-Mini locally, or continue with built-in Browser Voice.';
   }
   if ($('#btn-onb-start-zonos')) {
     $('#btn-onb-start-zonos').hidden = Boolean(s.zonosRunning);
+    $('#btn-onb-start-zonos').textContent = s.zonosBuilt ? '▶ Start ZONOS3 (:1919)' : '▶ Install & Start ZONOS3 (:1919)';
   }
 
   const banner = $('#onb-setup-status-banner');
@@ -220,7 +224,9 @@ function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
       banner.textContent = '✅ Both Ollama and ZONOS3-Mini Voice are ready! Continue to Step 2 to upload your CV.';
       banner.className = 'shop-status-msg is-success';
     } else if (isReady) {
-      banner.textContent = '✅ Ollama is ready! Optionally install ZONOS3-Mini above, or continue straight to Step 2 (Browser Voice works automatically).';
+      banner.textContent = s.zonosBuilt
+        ? '✅ Ollama is ready and ZONOS3-Mini is installed! Click Start above or continue straight to Step 2 (Browser Voice works automatically).'
+        : '✅ Ollama is ready! Optionally install ZONOS3-Mini above, or continue straight to Step 2 (Browser Voice works automatically).';
       banner.className = 'shop-status-msg is-success';
     } else if (!s.ollamaInstalled) {
       banner.textContent = '⚠️ Ollama CLI was not detected yet. Download & start Ollama first, then click "↻ Re-check" before uploading your CV.';
@@ -249,10 +255,23 @@ export function renderSettingsPage() {
     { cls: s.ollamaInstalled ? 'is-ok' : 'is-err', title: '1. Ollama CLI', desc: s.ollamaInstalled ? 'Installed ✅' : 'Not installed ❌ (Download below)' },
     { cls: s.ollamaRunning ? 'is-ok' : 'is-err', title: '2. Ollama Daemon', desc: s.ollamaRunning ? 'Running on :11434 ✅' : 'Stopped ⚠️ (Click Start)' },
     { cls: hasModels ? 'is-ok' : 'is-err', title: '3. Local LLM Models', desc: hasModels ? `${s.installedModels.length} model(s) ready ✅` : 'No model pulled yet ⚠️' },
-    { cls: s.zonosRunning ? 'is-ok' : 'is-err', title: '4. ZONOS3-Mini TTS (:1919)', desc: s.zonosRunning ? 'Natural 44.1kHz Voice ✅' : 'Offline (Browser TTS fallback)' },
+    {
+      cls: s.zonosRunning ? 'is-ok' : s.zonosBuilt ? 'is-warn' : 'is-err',
+      title: '4. ZONOS3-Mini TTS (:1919)',
+      desc: s.zonosRunning
+        ? 'Natural 44.1kHz Voice ✅'
+        : s.zonosBuilt
+          ? 'Installed locally ✅ (Stopped — Click Start)'
+          : 'Not installed (Browser TTS fallback)'
+    },
     { cls: s.whisperServerRunning ? 'is-ok' : 'is-warn', title: '5. Whisper Large-v3-Turbo (:1818)', desc: s.whisperServerRunning ? 'Tech Vocabulary STT Active ✅' : 'Stopped (Browser WebSpeech fallback)' }
   ];
   $('#setup-checklist').innerHTML = tiles.map((t) => `<div class="check-tile ${t.cls}"><strong>${esc(t.title)}</strong><br><span>${esc(t.desc)}</span></div>`).join('');
+
+  if ($('#btn-start-zonos')) {
+    $('#btn-start-zonos').hidden = Boolean(s.zonosRunning);
+    $('#btn-start-zonos').textContent = s.zonosBuilt ? '▶ Start ZONOS3 (:1919)' : '▶ Install & Start ZONOS3 (:1919)';
+  }
 
   populateZonosVoiceDropdowns();
   if ($('#tts-engine-select') && state.user?.ttsEngine) $('#tts-engine-select').value = state.user.ttsEngine;

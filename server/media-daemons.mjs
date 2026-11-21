@@ -301,8 +301,8 @@ export async function getSetupStatus() {
   ]);
 
   const [zonosRunning, whisperServerRunning] = await Promise.all([isZonosAlive(), isWhisperAlive()]);
-  const { bin, backbone } = getZonosLaunchPaths();
-  const zonosBuilt = existsSync(bin) && existsSync(backbone);
+  const { bin, backbone, decoder } = getZonosLaunchPaths();
+  const zonosBuilt = existsSync(bin) && existsSync(backbone) && existsSync(decoder);
   const whisperModelReady = existsSync(WHISPER_MODEL);
   const targetsCount = getDb().prepare('SELECT COUNT(*) AS cnt FROM target_interviews').get()?.cnt || 0;
 

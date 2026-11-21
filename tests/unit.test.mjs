@@ -85,14 +85,15 @@ test('model rankers prioritize planner and vision models properly', () => {
 });
 
 test('personalities and role-adapter return valid domain configs for uploaded CVs', () => {
-  assert.equal(PERSONALITY_DIMENSIONS.length, 10);
+  assert.equal(PERSONALITY_DIMENSIONS.length, 11);
   for (const dim of PERSONALITY_DIMENSIONS) {
     assert.ok(dim.options.length >= 4 && dim.options.length <= 5, `${dim.key} should have 4-5 moderate options`);
   }
 
   const mood = pickPersonality('HR');
   assert.ok(mood?.id && mood?.label && mood?.prompt);
-  assert.equal(Object.keys(mood.traits || {}).length, 10);
+  assert.equal(Object.keys(mood.traits || {}).length, 11);
+  assert.ok(mood.traits.humor);
 
   const rolled = rollInterviewPersonality('Technical');
   const cycled = cyclePersonalityTrait(rolled, 'patience');

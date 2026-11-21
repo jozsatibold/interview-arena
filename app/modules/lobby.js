@@ -134,7 +134,7 @@ function synthesizePersonalityFromTraits(traitOverrides = null, meta = {}) {
     id: meta.id || 'rolled-10d',
     emoji: meta.emoji || '🎲',
     label: meta.label || `${warmthLabel} · ${patienceLabel}`,
-    mood: meta.mood || `${warmthLabel}, ${patienceLabel.toLowerCase()} (10 randomized moderate traits)`,
+    mood: meta.mood || `${warmthLabel}, ${patienceLabel.toLowerCase()} (11 randomized moderate traits)`,
     trapHint: meta.trapHint || tipParts.filter(Boolean).join(' '),
     vibe,
     traits,
@@ -235,7 +235,7 @@ export async function openLobby(cfg, switchToView) {
     $('#lobby-voice-select').value = presetVoice;
   }
   const personalityOptions = [
-    { id: 'rolled-10d', emoji: '🎲', label: 'Random 10-Trait Roll', mood: 'Fresh moderate human blend' },
+    { id: 'rolled-10d', emoji: '🎲', label: 'Random 11-Trait Roll', mood: 'Fresh moderate human blend' },
     ...getTopicPersonalities(topic)
   ];
   fillSelectOptions($('#lobby-personality-select'), personalityOptions, {

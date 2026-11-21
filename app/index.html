@@ -153,10 +153,10 @@
               ></int-select>
               <div id="onb-pull-progress" class="pull-progress" hidden></div>
 
-              <div class="context-tier-box" data-context-tier-picker>
+              <div class="field-group context-tier-group" data-context-tier-picker>
                 <div class="context-tier-head">
                   <div class="context-tier-title-wrap">
-                    <span class="context-tier-title">Context Optimization</span>
+                    <span class="field-label" style="margin:0;">Context Optimization</span>
                     <button type="button" class="tier-info-btn" aria-expanded="false" aria-label="Explain LLM context optimization" title="What does this do?">ℹ️</button>
                   </div>
                   <span class="badge tier-resolved-badge">Auto</span>
@@ -388,8 +388,8 @@
             <strong id="lobby-avatar-name">Maya · Internal Fintech Talent Partner</strong>
             <small id="lobby-avatar-desc" class="muted">Pre-configured unique voice &amp; persona</small>
             <int-select control-id="lobby-voice-select" label="Interviewer Voice Preset" action-id="btn-lobby-test-voice" action-label="🔊 Hear Voice" action-variant="secondary"></int-select>
-            <int-select control-id="lobby-personality-select" label="🎲 Interviewer Personality (10 Moderate Traits)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll All" action-variant="ghost"></int-select>
-            <div id="lobby-personality-traits" class="lobby-trait-grid" aria-label="10 Interviewer Personality Dimensions (click a trait to adjust)"></div>
+            <int-select control-id="lobby-personality-select" label="🎲 Interviewer Personality (11 Moderate Traits)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll All" action-variant="ghost"></int-select>
+            <div id="lobby-personality-traits" class="lobby-trait-grid" aria-label="11 Interviewer Personality Dimensions (click a trait to adjust)"></div>
             <p id="lobby-personality-tip" class="lobby-personality-tip muted"></p>
             <label class="voice-toggle" style="margin-top:0.35rem;">
               <input type="checkbox" id="lobby-continuous-toggle" checked>
@@ -867,10 +867,10 @@
               action-variant="secondary"
             ></int-select>
 
-            <div class="context-tier-box" data-context-tier-picker>
+            <div class="field-group context-tier-group" data-context-tier-picker>
               <div class="context-tier-head">
                 <div class="context-tier-title-wrap">
-                  <span class="context-tier-title">Context Optimization</span>
+                  <span class="field-label" style="margin:0;">Context Optimization</span>
                   <button type="button" class="tier-info-btn" aria-expanded="false" aria-label="Explain LLM context optimization" title="What does this do?">ℹ️</button>
                 </div>
                 <span class="badge tier-resolved-badge">Auto</span>

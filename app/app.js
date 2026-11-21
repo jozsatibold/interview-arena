@@ -25,10 +25,11 @@ export function switchToView(viewId) {
       if (isTarget) tab.setAttribute('aria-current', 'page');
       else tab.removeAttribute('aria-current');
     }
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   const afterTransition = () => {
-    document.getElementById(viewId)?.focus();
+    document.getElementById(viewId)?.focus({ preventScroll: true });
     if (viewId === 'view-practice' && !$('#practice-guest-toggle')?.checked) refreshTutorMemory();
   };
 
