@@ -5,7 +5,12 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PERSONALITIES_BY_TOPIC } from './personalities.mjs';
+import {
+  PERSONALITIES_BY_TOPIC,
+  PERSONALITY_DIMENSIONS,
+  FIXED_TUTOR_PERSONALITY,
+  FIXED_LOGIC_PERSONALITY
+} from './personalities.mjs';
 import { LOGIC_DIFFICULTIES, LOGIC_CATEGORIES } from './logic-puzzles.mjs';
 import {
   ROOT_DIR,
@@ -214,6 +219,11 @@ const server = http.createServer(async (req, res) => {
         needsOnboarding: bundle.needsOnboarding,
         agents: bundle.agents,
         personalitiesByTopic: PERSONALITIES_BY_TOPIC,
+        personalityDimensions: PERSONALITY_DIMENSIONS,
+        fixedPersonas: {
+          tutor: FIXED_TUTOR_PERSONALITY,
+          logic: FIXED_LOGIC_PERSONALITY
+        },
         jobDescriptions: bundle.jobDescriptions,
         morningPath: bundle.morningPath,
         activeCv: bundle.activeCv,

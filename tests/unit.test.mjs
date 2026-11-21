@@ -14,7 +14,18 @@ import {
   pickRecommendedPlannerModels,
   pickVisionModels
 } from '../server/ollama.mjs';
-import { pickPersonality } from '../personalities.mjs';
+import {
+  PERSONALITY_DIMENSIONS,
+  FIXED_TUTOR_PERSONALITY,
+  FIXED_LOGIC_PERSONALITY,
+  rollInterviewPersonality,
+  cyclePersonalityTrait,
+  pickPersonality
+} from '../personalities.mjs';
+import {
+  stripStaticOpenerSection,
+  buildInterviewPacingDirectives
+} from '../server/pacing.mjs';
 import { detectRoleArchetype, getAdaptedAgents } from '../role-adapter.mjs';
 import { AGENT_META } from '../server/config.mjs';
 
@@ -69,8 +80,23 @@ test('model rankers prioritize planner and vision models properly', () => {
 });
 
 test('personalities and role-adapter return valid domain configs for uploaded CVs', () => {
+  assert.equal(PERSONALITY_DIMENSIONS.length, 10);
+  for (const dim of PERSONALITY_DIMENSIONS) {
+    assert.ok(dim.options.length >= 4 && dim.options.length <= 5, `${dim.key} should have 4-5 moderate options`);
+  }
+
   const mood = pickPersonality('HR');
   assert.ok(mood?.id && mood?.label && mood?.prompt);
+  assert.equal(Object.keys(mood.traits || {}).length, 10);
+
+  const rolled = rollInterviewPersonality('Technical');
+  const cycled = cyclePersonalityTrait(rolled, 'patience');
+  assert.notEqual(cycled.traits.patience, rolled.traits.patience);
+
+  assert.equal(FIXED_TUTOR_PERSONALITY.mode, 'tutor');
+  assert.equal(FIXED_TUTOR_PERSONALITY.traits.patience, 'very-patient');
+  assert.equal(FIXED_LOGIC_PERSONALITY.mode, 'logic');
+  assert.equal(FIXED_LOGIC_PERSONALITY.traits.patience, 'balanced-pace');
 
   const arch = detectRoleArchetype('Senior Java Spring Boot Microservices Engineer with Kafka and PostgreSQL', {
     headline: 'Senior Java Engineer',
@@ -83,4 +109,26 @@ test('personalities and role-adapter return valid domain configs for uploaded CV
     agentOverrides: {}
   });
   assert.equal(adapted.length, AGENT_META.length);
+});
+
+test('interview pacing enforces warm-up, smooth agenda intro, bridged exploration, and opener stripping', () => {
+  const cleaned = stripStaticOpenerSection('# Agent 01\nMain rules\n\n## 4. How to Start Immediately\n> Jump right in!');
+  assert.equal(cleaned.includes('How to Start Immediately'), false);
+  assert.ok(cleaned.includes('Main rules'));
+
+  const p0 = buildInterviewPacingDirectives({ action: 'start', topic: 'HR', userTurns: 0, firstName: 'Alex' });
+  assert.equal(p0.phase, 'warmup');
+  assert.ok(/Do NOT ask a CV-specific/i.test(p0.startPrompt));
+
+  const p1 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 1, firstName: 'Alex', openerHint: 'Day 2 CV gap' });
+  assert.equal(p1.phase, 'intro');
+  assert.ok(/Do NOT jump abruptly from "How are you\?"/i.test(p1.pacingBlock));
+
+  const p2 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 2, firstName: 'Alex', openerHint: 'Day 2 CV gap' });
+  assert.equal(p2.phase, 'explore');
+  assert.ok(/BRIDGE smoothly/i.test(p2.pacingBlock));
+
+  const p4 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 4, firstName: 'Alex' });
+  assert.equal(p4.phase, 'closing');
+  assert.ok(/practical alignment/i.test(p4.pacingBlock));
 });

@@ -1,7 +1,17 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { pickPersonality } from '../personalities.mjs';
+import {
+  pickPersonality,
+  FIXED_TUTOR_PERSONALITY,
+  FIXED_LOGIC_PERSONALITY
+} from '../personalities.mjs';
+import {
+  stripStaticOpenerSection,
+  buildInterviewPacingDirectives,
+  TUTOR_PACING_RULE,
+  LOGIC_PACING_RULE
+} from './pacing.mjs';
 import { getAdaptedAgents, buildDynamicAgentDirective } from '../role-adapter.mjs';
 import {
   LOGIC_DIFFICULTIES,
@@ -384,11 +394,14 @@ Student first name: ${firstName}${stackSummary ? ` (Software background: ${stack
 English Target Level: ${tutorLevel}.
 Lesson Focus: ${activeTopicText}.${studentBrief}
 
+${FIXED_TUTOR_PERSONALITY.prompt}
+${TUTOR_PACING_RULE}
+
 CORE TEACHING & REALISM RULES (CRITICAL):
 1. ANTI-SYCOPHANCY / PROPORTIONAL REACTIONS: NEVER say hollow hype like "Amazing!", "Awesome!", "Fantastic!", "Brilliant!" on ordinary, routine, tiring, or technical things! Match your reaction proportionally and honestly to what ${firstName} actually said.
-2. PERSONALIZED ANALOGIES & DIVERSE EXPLORATION: If explaining a grammar rule or subtle nuance, use analogies matching ${firstName}'s thinking style and known hobbies/work when it fits naturally — and keep the chat moving across varied, interesting adjacent subjects.
-3. GENTLE TEACHING & WHY: Whenever ${firstName} makes a genuine grammar mistake or awkward literal phrasing, react naturally first, model the natural phrasing, explain WHY concisely in 1-2 sentences, and ask one engaging follow-up question.
-4. CRISP EXPRESSIVE OPENER: Start every reply with ONE short 3-7 word proportionally attuned spoken sentence, then continue in 2-3 spoken sentences (NO markdown, NO asterisks, NO emojis, NO bullet points).
+2. PERSONALIZED ANALOGIES & DIVERSE EXPLORATION: If explaining a grammar rule or subtle nuance, use analogies matching ${firstName}'s thinking style and known hobbies/work when it fits naturally — and keep the chat moving across varied, interesting adjacent subjects with gentle bridges.
+3. PATIENT TEACHING & WHY: Whenever ${firstName} makes a genuine grammar mistake or awkward literal phrasing, react patiently and warmly first, model the natural phrasing kindly, explain WHY concisely in 1-2 sentences, and ask one supportive follow-up question.
+4. CRISP EXPRESSIVE OPENER: Start every reply with ONE short 3-7 word proportionally attuned spoken sentence, then continue in 2-3 patient spoken sentences (NO markdown, NO asterisks, NO emojis, NO bullet points).
 5. LANGUAGE RULE: English ONLY everywhere. Ignore minor voice-recognition phonetic typos.
 
 STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
@@ -412,8 +425,10 @@ function buildLogicSystemPrompt({ teacher, puzzle, firstName = 'there', scratchp
   const padClean = String(scratchpadText || '').trim();
   const constraintsText = (puzzle.constraints || []).map((c) => `- ${c}`).join('\n');
 
-  return `You are ${teacher.name}, a sharp, collaborative female analytical interview partner (${teacher.accent} · ${teacher.specialty}) co-solving a ${puzzle.durationMinutes}-minute interview logic puzzle with ${firstName}.
+  return `You are ${teacher.name}, a steady, balanced female analytical interview partner (${teacher.accent} · ${teacher.specialty}) co-solving a ${puzzle.durationMinutes}-minute interview logic puzzle with ${firstName}.
 Time Status: ${minsLeft}.
+${FIXED_LOGIC_PERSONALITY.prompt}
+${LOGIC_PACING_RULE}
 ${guestMode ? 'GUEST MODE ACTIVE: Be welcoming and neutral. Do NOT reference any personal background, CV, or hobbies.' : studentBrief}
 
 === ACTIVE LOGIC PUZZLE ===
@@ -471,6 +486,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     customInterviewId = null,
     customRoundId = null,
     personalityId = null,
+    personalityTraits = null,
     messages = [],
     action = 'turn',
     topic = 'HR',
@@ -519,7 +535,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       guestMode: isGuestSession,
       boardCheckOnly: Boolean(boardCheckOnly)
     });
-    startPrompt = `Introduce yourself briefly as ${teacher.name}, set the ${puzzle.durationMinutes}-minute timer framing for "${puzzle.title}", summarize the core puzzle clearly in 2-3 spoken English sentences (mentioning you can both see and collaborate on the live Scratchpad), and invite ${isGuestSession ? 'them' : firstName} to share their first angle or assumption. Output ${COACH_JSON_DELIMITER} with empty grammarFixes and scratchpadPin: null.`;
+    startPrompt = `Introduce yourself briefly as ${teacher.name} with a calm, steady, balanced manner, set the ${puzzle.durationMinutes}-minute timer framing for "${puzzle.title}", summarize the core puzzle clearly in 2-3 spoken English sentences (mentioning you can both see and collaborate on the live Scratchpad), and invite ${isGuestSession ? 'them' : firstName} to share their first angle or assumption. Output ${COACH_JSON_DELIMITER} with empty grammarFixes and scratchpadPin: null.`;
   } else if (mode === 'tutor') {
     const teacher = TUTOR_CATALOG.teachers.find((t) => t.id === tutorTeacherId) || TUTOR_CATALOG.teachers[0];
     const topicObj = TUTOR_CATALOG.topics.find((tp) => tp.id === topic || tp.id === tutorTopic) || TUTOR_CATALOG.topics[0];
@@ -541,7 +557,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         studentBrief: '\nGUEST PRACTICE MODE: Have a straightforward, friendly general English conversation. Do NOT assume any specific profession, hobby, or prior history. Do NOT save or reference any personal profile notes.',
         retryOf, action
       });
-      startPrompt = `Greet the guest learner naturally as ${teacher.name} (friendly & grounded, no fake hype!), smoothly start an approachable conversation about "${chosenTutorAngle}", and ask one welcoming open question! Output ${COACH_JSON_DELIMITER} with empty grammarFixes.`;
+      startPrompt = `Greet the guest learner patiently and warmly as ${teacher.name} (helpful & unhurried, no fake hype!), smoothly start an approachable conversation about "${chosenTutorAngle}", and ask one welcoming open question! Output ${COACH_JSON_DELIMITER} with empty grammarFixes.`;
     } else {
       const stackSummary = (activeCv?.profile?.coreStack || []).slice(0, 5).join(', ');
       const mem = getStudentMemorySync();
@@ -559,29 +575,43 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         teacher, topicObj, customTopic: customTopicText, tutorLevel, firstName, stackSummary,
         studentBrief: buildStudentMemoryBrief(mem, chosenTutorAngle), retryOf, action
       });
-      startPrompt = `Greet ${firstName} naturally as ${teacher.name} (grounded, no fake hype!), smoothly open a conversation on this fresh angle: "${chosenTutorAngle}"${mem.hobbies?.length ? ' (feel free to weave a natural bridge without forcing past hobbies)' : ''}, and ask one engaging open question! Output ${COACH_JSON_DELIMITER} with empty grammarFixes.`;
+      startPrompt = `Greet ${firstName} patiently and warmly as ${teacher.name} (helpful & unhurried, no fake hype!), smoothly open a conversation on this fresh angle: "${chosenTutorAngle}"${mem.hobbies?.length ? ' (feel free to weave a natural bridge without forcing past hobbies)' : ''}, and ask one engaging open question! Output ${COACH_JSON_DELIMITER} with empty grammarFixes.`;
     }
   } else {
     const isContinuous = continuousFlow !== undefined ? Boolean(continuousFlow) : topic === 'HR';
     const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv);
     const meta = adaptedAgents.find((a) => a.id === path.basename(agentFile));
-    const personality = pickPersonality(topic, personalityId);
-    const personalityBlock = `INTERVIEWER PERSONALITY / MOOD (${personality.emoji} ${personality.label} — ${personality.mood}):\nStay strictly in this authentic human personality in every spoken sentence.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
+    const personality = pickPersonality(topic, personalityTraits || personalityId);
+    const personalityBlock = `INTERVIEWER PERSONALITY (${personality.emoji} ${personality.label} — ${personality.mood}):\nEmbody this realistic human personality naturally without exaggerating or becoming extreme.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
+    const rawAgentMd = useStaticAgentFile
+      ? stripStaticOpenerSection(await fs.readFile(path.join(ROOT_DIR, 'agents', path.basename(agentFile)), 'utf8'))
+      : '';
     const agentPrompt = useStaticAgentFile
-      ? summarizeMdPrompt(await fs.readFile(path.join(ROOT_DIR, 'agents', path.basename(agentFile)), 'utf8'), isFinish ? 2200 : 1900)
+      ? summarizeMdPrompt(rawAgentMd, isFinish ? 2200 : 1900)
       : buildDynamicAgentDirective({ meta, activeCv });
     const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day }, isFinish ? 1400 : 1300);
+    const userTurns = normalizedMsgs.filter((m) => m.role === 'user').length;
+    const pacing = buildInterviewPacingDirectives({
+      action,
+      topic,
+      userTurns,
+      firstName,
+      avatarName: meta?.avatarName || 'the interviewer',
+      personality,
+      openerHint
+    });
 
     if (!isFinish) {
       const activeProfilePrompt = activeCv?.profile?.profilePrompt || COMPACT_CANDIDATE_PROFILE;
       const ndaClause = 'unless the candidate makes a major interview red flag (badmouthing past teams or sharing confidential internal data)';
       const flowRule = isContinuous
-        ? `CONTINUOUS DIALOGUE MODE: React authentically in your assigned personality to a detail ${firstName} said and ask ONE follow-up or next question in 2-3 crisp spoken English sentences. NEVER interrupt with coachPause ${ndaClause}. INSTEAD, whenever ${firstName} says ANY grammar error, non-native phrasing, or awkward B2 wording, put 1-2 immediate fixes in "grammarFixes"!`
+        ? `CONTINUOUS DIALOGUE MODE: React authentically in your assigned personality to a detail ${firstName} said, bridge smoothly if changing topic, and ask ONE follow-up or next question in 2-4 crisp spoken English sentences. NEVER interrupt with coachPause ${ndaClause}. INSTEAD, whenever ${firstName} says ANY grammar error, non-native phrasing, or awkward B2 wording, put 1-2 immediate fixes in "grammarFixes"!`
         : `STRICT COACH MODE: If ${firstName} uses plain B2 phrasing, awkward non-native grammar, or shares confidential baselines, output a brief English pause line and populate coachPause with 2 Senior upgrades AND include specific fixes in "grammarFixes".`;
 
       systemPrompt = `${activeProfilePrompt}
 Interviewer Persona: ${meta?.avatarName || 'Interviewer'} (${meta?.title || topic}).
 ${personalityBlock}
+${pacing.pacingBlock}
 ${agentPrompt}
 Target Role: ${jdPrompt}
 
@@ -589,7 +619,7 @@ LANGUAGE RULE (CRITICAL): English ONLY everywhere.
 STT TOLERANCE RULE: Fix ASR typos silently — ONLY critique real English grammar/phrasing mistakes!
 
 STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
-1. First, begin IMMEDIATELY with a short 3-7 word proportionally attuned reaction, followed by 1-2 crisp conversational sentences (NO markdown, NO emojis, NO bullet points, NO JSON yet).
+1. First, begin IMMEDIATELY with a short 3-7 word proportionally attuned reaction, followed by 1-3 crisp conversational sentences (include a gentle 1-sentence transition bridge whenever introducing a new angle or CV detail; NO markdown, NO emojis, NO bullet points, NO JSON yet).
 2. After the spoken English reply, put exact delimiter on its own line:
 ${COACH_JSON_DELIMITER}
 3. Immediately after the delimiter, write ONE compact JSON object in English ONLY:
@@ -601,9 +631,7 @@ ${COACH_JSON_DELIMITER}
 On EVERY "turn" (not "start"): include 1-2 "grammarFixes" whenever anything grammatical or phrasing-wise can be improved! On "start", set "grammarFixes": [].
 ${flowRule}${action === 'turn' && retryOf?.better ? `\n\nRETRY PRACTICE NOTE: ${firstName} clicked "Say It Again" to practice improving "${String(retryOf.said || '').slice(0, 180)}" -> "${String(retryOf.better).slice(0, 240)}". Briefly acknowledge cleanly, then ask your next follow-up.` : ''}`;
 
-      startPrompt = openerHint
-        ? `Open the call immediately in character as ${meta?.avatarName || 'the interviewer'} (${personality.label}: ${personality.mood}) and ask a tailored version of this opening question: "${openerHint}". Then output ${COACH_JSON_DELIMITER} with null fields.`
-        : `Open the call immediately in character as ${meta?.avatarName || 'the interviewer'} (${personality.label}: ${personality.mood}) with your realistic greeting and first question matching that mood, then ${COACH_JSON_DELIMITER} with null fields.`;
+      startPrompt = `${pacing.startPrompt}\nThen output ${COACH_JSON_DELIMITER} with empty grammarFixes and null coachPause.`;
     } else {
       const coreRules = !useStaticAgentFile
         ? `${activeCv?.profile?.profilePrompt || ''}\n\nFULL CV:\n${summarizeMdPrompt(activeCv?.rawText || '', 3000)}`

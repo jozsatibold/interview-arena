@@ -165,7 +165,13 @@ export async function startSession(cfg) {
   const isPractice = isTutor || isLogic;
   const meta = isPractice ? null : getActiveAgentMeta(cfg.agentFile);
   const voice = cfg.voice || cfg.tutorTeacher?.voice || meta?.defaultVoice || 'AmericanFemale';
-  const personality = isPractice ? null : (cfg.personality || pickRandomPersonality(cfg.topic || meta?.topic || 'HR'));
+  const fixedTutor = state.catalog?.fixedPersonas?.tutor || null;
+  const fixedLogic = state.catalog?.fixedPersonas?.logic || null;
+  const personality = isLogic
+    ? fixedLogic
+    : isTutor
+      ? fixedTutor
+      : (cfg.personality || pickRandomPersonality(cfg.topic || meta?.topic || 'HR'));
   const appearance = cfg.appearance || (isPractice
     ? {
         id: cfg.tutorTeacher?.hairStyle || 'layered',
@@ -251,6 +257,7 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
     customInterviewId: s.customInterviewId || null,
     customRoundId: s.customRoundId || null,
     personalityId: s.personality?.id || null,
+    personalityTraits: s.mode === 'interview' ? (s.personality?.traits || null) : null,
     topic: s.topic,
     day: s.day,
     messages: s.messages,

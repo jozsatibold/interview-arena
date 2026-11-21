@@ -111,12 +111,17 @@ function pickOne(arr) {
 }
 
 function classifyPersonalityVibe(personality) {
+  if (personality?.vibe && VIBE_SUIT_PALETTES[personality.vibe]) return personality.vibe;
+  const warmth = personality?.traits?.warmth || '';
+  if (/warm|friendly/.test(warmth)) return 'warm';
+  const skep = personality?.traits?.skepticism || '';
+  if (/devils-advocate/.test(skep)) return 'pedantic';
   const id = personality?.id || '';
   if (/warm|empathetic|good-cop|collab|mentor/.test(id)) return 'warm';
   if (/bored|exhausted|burned-out|unimpressed|tired|silent-observer/.test(id)) return 'bored';
   if (/cold|hardball|bar-raiser|cfo|agency|urgency|low-anchor|skeptic|purist|security|grumpy|saboteur|trivia/.test(id)) return 'hardball';
   if (/startup|whiteboard|founder|product|async/.test(id)) return 'creative';
-  return 'pedantic';
+  return 'creative';
 }
 
 export function rollAppearance(meta, personality, genderOverride = null) {
