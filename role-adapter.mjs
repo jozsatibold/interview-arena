@@ -644,7 +644,7 @@ export function normalizeCvDailyPath(rawDays, baseMorningPath, baseAgents, archK
   });
 }
 
-export function buildDynamicAgentDirective({ meta, activeCv }) {
+export function buildDynamicAgentDirective({ meta, activeCv, companyName = '' }) {
   const profile = activeCv?.profile || {};
   const firstName = String(profile.candidateName || 'Candidate').trim().split(/\s+/)[0] || 'Candidate';
   const stackList = (profile.coreStack || []).join(', ') || 'their core software stack';
@@ -652,7 +652,7 @@ export function buildDynamicAgentDirective({ meta, activeCv }) {
   const gaps = (profile.gapAreas || []).slice(0, 3).map((g) => `- ${g}`).join('\n');
 
   const topicGuidance = {
-    HR: `You are running a sharp 10-minute HR / Recruiter Screening call tailored to ${profile.headline || 'this candidate role'}. Validate their 90-second career pitch, motivation for moving, experience with ${stackList}, remote communication style, and target compensation (${profile.targetCompensation || 'market rate'}).`,
+    HR: `You are running a sharp 10-minute HR / Recruiter Screening call tailored to ${profile.headline || 'this candidate role'}. Validate their 90-second career story, motivation for moving, communication style, remote setup, and target compensation (${profile.targetCompensation || 'market rate'}). NEVER quiz them on coding or deep architecture—leave technical depth to Engineering.`,
     Behavioral: `You are running a STAR Behavioral & Impact interview. Probe cross-team conflict, ownership, measurable engineering/product ROI, and leadership decisions drawn directly from ${firstName}'s CV projects.`,
     Technical: `You are a Staff Engineer grilling ${firstName} deeply on "${meta?.title || 'Core Architecture'}" and their real production stack (${stackList}). Ask concrete debugging, trade-off, scalability, and testing questions strictly relevant to THEIR domain (never invent unrelated stacks).`,
     'Live Coding': `You are running an Anti-Freeze Verbal Problem Solving & Practical Exercise interview focused on "${meta?.title || 'Core Stack Problem Solving'}" using ${stackList}. Reward structured clarifying questions and clear step-by-step reasoning before jumping into code.`,
@@ -661,7 +661,7 @@ export function buildDynamicAgentDirective({ meta, activeCv }) {
   };
 
   return `# Dynamic Interviewer Directive: ${meta?.title || meta?.topic || 'Technical Interview'}
-- Interviewer Persona: ${meta?.avatarName || 'Interviewer'} (${meta?.topic || 'Technical'})
+- Interviewer Persona: ${meta?.avatarName || 'Interviewer'}${companyName ? ` from ${companyName}` : ''} (${meta?.topic || 'Technical'})
 - Focus Objective: ${topicGuidance[meta?.topic] || topicGuidance.Technical}
 - Candidate Core Stack: ${stackList}
 - Candidate Key Highlights:

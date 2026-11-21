@@ -119,6 +119,7 @@ function applyStatePatch(state, patch) {
   if (patch.zonosVoice) state.zonosVoice = patch.zonosVoice;
   if (patch.defaultAutoSpeak !== undefined) state.defaultAutoSpeak = Boolean(patch.defaultAutoSpeak);
   if (patch.defaultContinuousFlow !== undefined) state.defaultContinuousFlow = Boolean(patch.defaultContinuousFlow);
+  if (['standard', 'detailed'].includes(patch.avatarQuality)) state.avatarQuality = patch.avatarQuality;
 
   if (patch.usePowerUp && state.powerUps[patch.usePowerUp] > 0) {
     state.powerUps[patch.usePowerUp] -= 1;

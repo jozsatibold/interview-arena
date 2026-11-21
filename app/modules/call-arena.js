@@ -1,6 +1,8 @@
 import { esc, consumeNdjsonStream, saveUserState } from '../components.js';
+import { pickRandomCompanyName } from '../../shared/company.mjs';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
 import { getActiveAgentMeta, rollAppearance, rollOfficeBackdrop, inferVoiceGender, renderAvatarVisual, updateAvatarStage, setAvatarState } from './avatar.js';
+import { rollDetailedDna } from './avatar-detailed.js';
 import { populateZonosVoiceDropdowns, stopAllSpeech, enqueueSpeakSentence, speakEnglish, syncVideoStreams, toggleCamera, stopMediaStream, upsertLiveDraftBubble } from './voice-media.js';
 import { setScratchpadOpen, stopLogicTimer, startLogicTimer, renderTutorPin, updateScratchpadSyncPill, renderScratchpadForPuzzle, wireScratchpadEvents } from './scratchpad.js';
 import { renderHud, showScorecardDialog, renderStats, renderMistakes } from './stats-shop.js';
@@ -183,15 +185,22 @@ export async function startSession(cfg) {
         hairColor: { hairA: cfg.tutorTeacher?.palette?.hairA, hairB: cfg.tutorTeacher?.palette?.hairB },
         eyeColor: { id: 'warm', iris: cfg.tutorTeacher?.palette?.iris || '#4d6b43', ring: cfg.tutorTeacher?.palette?.ring || '#2d4226' },
         ...(cfg.tutorTeacher?.palette || {}),
+        dna: rollDetailedDna(cfg.tutorTeacher, null, 'female'),
         ...rollOfficeBackdrop(),
         sig: cfg.tutorTeacher?.id || 'tutor'
       }
     : rollAppearance(meta, personality, inferVoiceGender(voice)));
 
+  const interviewerCompany = (!isPractice && !cfg.customInterviewId)
+    ? (cfg.interviewerCompany || pickRandomCompanyName(`${state.activeCv?.rawText || ''} ${state.activeCv?.profile?.profilePrompt || ''}`))
+    : '';
+
   state.activeSession = {
     mode: isLogic ? 'logic' : isTutor ? 'tutor' : 'interview',
     guestMode: Boolean(cfg.guestMode && isPractice),
     ...cfg,
+    interviewerCompany,
+    liveExpression: 'warm',
     voice,
     personality,
     appearance,
@@ -219,7 +228,7 @@ export async function startSession(cfg) {
     renderTutorPin(null);
   }
 
-  $('#arena-subtitle').textContent = `${cfg.title} • Model: ${state.user.selectedModel}`;
+  $('#arena-subtitle').textContent = `${cfg.title}${interviewerCompany ? ` · ${interviewerCompany}` : ''} • Model: ${state.user.selectedModel}`;
   $('#chat-log').innerHTML = '';
   $('#coach-box').innerHTML = isLogic
     ? (cfg.guestMode
@@ -257,6 +266,7 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
     boardCheckOnly: Boolean(boardCheckOnly),
     agentFile: s.agentFile,
     jdFile: s.jdFile,
+    interviewerCompany: s.interviewerCompany || '',
     customInterviewId: s.customInterviewId || null,
     customRoundId: s.customRoundId || null,
     personalityId: s.personality?.id || null,
@@ -409,6 +419,8 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       }
       if (finalDone.tutorAngle && state.activeSession?.mode === 'tutor') {
         $('#arena-subtitle').textContent = `${state.activeSession?.tutorTeacher?.name || 'Tutor'} · Fresh Topic: ${finalDone.tutorAngle} • Model: ${model}`;
+      } else if (finalDone.interviewerCompany && state.activeSession?.mode === 'interview' && !state.activeSession?.customInterviewId) {
+        state.activeSession.interviewerCompany = finalDone.interviewerCompany;
       }
       if (activeRetry?.card?.isConnected) {
         activeRetry.card.classList.add('is-practiced');
@@ -416,6 +428,9 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
         if (retryBtn) retryBtn.textContent = '✅ Re-Spoken (+25 XP)';
       }
       const reply = finalDone.reply;
+      if (reply?.expression && state.activeSession) {
+        state.activeSession.liveExpression = reply.expression;
+      }
       if (isLogic && reply.scratchpadPin) renderTutorPin(reply.scratchpadPin);
       if (reply.spokenEnglish) {
         if (!streamBubble) streamBubble = appendChatBubble('ai', reply.spokenEnglish);

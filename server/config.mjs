@@ -86,7 +86,7 @@ export const AGENT_META = [
     gender: 'female',
     hairStyle: 'bob',
     glasses: 'none',
-    headset: 'earpiece',
+    headset: 'none',
     tie: false,
     badgeText: 'HR',
     palette: { suitA: '#fb7185', suitB: '#be123c', hairA: '#6b3e26', hairB: '#381e12', bgA: '#fff1f2', bgB: '#ffe4e6', accent: '#f43f5e' }
@@ -103,7 +103,7 @@ export const AGENT_META = [
     gender: 'male',
     hairStyle: 'quiff',
     glasses: 'executive',
-    headset: 'earpiece',
+    headset: 'none',
     tie: true,
     badgeText: 'UK',
     palette: { suitA: '#0ea5e9', suitB: '#0369a1', hairA: '#475569', hairB: '#1e293b', bgA: '#f0f9ff', bgB: '#bae6fd', accent: '#8b5cf6' }
@@ -273,7 +273,7 @@ export const AGENT_META = [
     gender: 'male',
     hairStyle: 'quiff',
     glasses: 'tech',
-    headset: 'earpiece',
+    headset: 'none',
     tie: false,
     badgeText: 'DOM',
     palette: { suitA: '#155e75', suitB: '#083344', hairA: '#312e81', hairB: '#1e1b4b', bgA: '#082f49', bgB: '#0c4a6e', accent: '#22d3ee' }
@@ -446,7 +446,7 @@ export const TUTOR_CATALOG = {
       gender: 'female',
       hairStyle: 'ponytail',
       glasses: 'none',
-      headset: 'earpiece',
+      headset: 'none',
       palette: { suitA: '#0d9488', suitB: '#115e59', hairA: '#d4a64a', hairB: '#8f671e', iris: '#8d5b24', ring: '#543310', bgA: '#f0fdfa', bgB: '#ccfbf1', accent: '#5eead4' }
     }
   ],
@@ -512,6 +512,7 @@ export const DEFAULT_STATE = {
   zonosVoice: 'AmericanFemale',
   defaultAutoSpeak: true,
   defaultContinuousFlow: true,
+  avatarQuality: 'standard',
   powerUps: {
     antiFreezeShield: 3,
     seniorHint: 4,

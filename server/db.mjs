@@ -47,6 +47,7 @@ export function getDb() {
       zonos_voice TEXT NOT NULL DEFAULT 'AmericanFemale',
       default_auto_speak INTEGER NOT NULL DEFAULT 1,
       default_continuous_flow INTEGER NOT NULL DEFAULT 1,
+      avatar_quality TEXT NOT NULL DEFAULT 'standard',
       power_ups_json TEXT NOT NULL,
       completed_days_json TEXT NOT NULL
     );
@@ -142,6 +143,7 @@ export function getDb() {
   if (!cols.has('default_auto_speak')) db.exec('ALTER TABLE user_profile ADD COLUMN default_auto_speak INTEGER NOT NULL DEFAULT 1');
   if (!cols.has('default_continuous_flow')) db.exec('ALTER TABLE user_profile ADD COLUMN default_continuous_flow INTEGER NOT NULL DEFAULT 1');
   if (!cols.has('model_context_tier')) db.exec("ALTER TABLE user_profile ADD COLUMN model_context_tier TEXT NOT NULL DEFAULT 'auto'");
+  if (!cols.has('avatar_quality')) db.exec("ALTER TABLE user_profile ADD COLUMN avatar_quality TEXT NOT NULL DEFAULT 'standard'");
 
   const cvCols = new Set(db.prepare('PRAGMA table_info(cv_versions)').all().map((c) => c.name));
   if (!cvCols.has('generated_jds_json')) db.exec("ALTER TABLE cv_versions ADD COLUMN generated_jds_json TEXT NOT NULL DEFAULT '[]'");
@@ -178,8 +180,8 @@ export function writeFullStateSync(db, state) {
       INSERT INTO user_profile (
         id, xp, gems, streak, last_practice_date, streak_freezes,
         selected_model, model_context_tier, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
-        default_auto_speak, default_continuous_flow, power_ups_json, completed_days_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        default_auto_speak, default_continuous_flow, avatar_quality, power_ups_json, completed_days_json
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         xp = excluded.xp,
         gems = excluded.gems,
@@ -195,6 +197,7 @@ export function writeFullStateSync(db, state) {
         zonos_voice = excluded.zonos_voice,
         default_auto_speak = excluded.default_auto_speak,
         default_continuous_flow = excluded.default_continuous_flow,
+        avatar_quality = excluded.avatar_quality,
         power_ups_json = excluded.power_ups_json,
         completed_days_json = excluded.completed_days_json
     `).run(
@@ -212,6 +215,7 @@ export function writeFullStateSync(db, state) {
       String(state.zonosVoice || 'AmericanFemale'),
       state.defaultAutoSpeak === false ? 0 : 1,
       state.defaultContinuousFlow === false ? 0 : 1,
+      ['standard', 'detailed'].includes(state.avatarQuality) ? state.avatarQuality : 'standard',
       JSON.stringify(state.powerUps || DEFAULT_STATE.powerUps),
       JSON.stringify(Array.isArray(state.completedDays) ? state.completedDays : [])
     );
@@ -336,6 +340,7 @@ export async function ensureState() {
     zonosVoice: row.zonos_voice,
     defaultAutoSpeak: row.default_auto_speak !== 0,
     defaultContinuousFlow: row.default_continuous_flow !== 0,
+    avatarQuality: row.avatar_quality || 'standard',
     powerUps: { ...DEFAULT_STATE.powerUps, ...JSON.parse(row.power_ups_json || '{}') },
     completedDays: JSON.parse(row.completed_days_json || '[]'),
     sessions,

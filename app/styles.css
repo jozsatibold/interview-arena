@@ -1584,6 +1584,10 @@
     .tier-seg-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
+
+    .tier-seg-grid.tier-two-col {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   .tier-seg-btn {
@@ -3771,7 +3775,8 @@
   .call-stage.is-thinking .voice-rings span:first-child { border-color: rgba(251, 191, 36, 0.55); animation: listenPulse 1.6s ease-in-out infinite; }
   .call-stage.is-listening .voice-rings span:first-child { border-color: rgba(168, 85, 247, 0.5); animation: listenPulse 1.5s ease-in-out infinite; }
 
-  .interviewer-svg {
+  .interviewer-svg,
+  .detailed-avatar-canvas {
     inline-size: 100%;
     block-size: 100%;
     overflow: visible;

@@ -25,6 +25,8 @@ import {
   findLogicPuzzle
 } from '../logic-puzzles.mjs';
 import { normalizeInterviewTranscript } from '../shared/transcript.mjs';
+import { pickRandomCompanyName, companyAppearsInText } from '../shared/company.mjs';
+import { normalizeExpression } from '../shared/expression.mjs';
 import {
   ROOT_DIR,
   AGENT_META,
@@ -267,6 +269,7 @@ function extractCoachMeta(parsedMeta) {
     }));
   const scratchpadPin = parsedMeta?.scratchpadPin ? String(parsedMeta.scratchpadPin).trim().slice(0, 480) : null;
   return {
+    expression: normalizeExpression(parsedMeta?.expression),
     coachPause: parsedMeta?.coachPause || null,
     microTipHu: parsedMeta?.microTipHu || null,
     grammarFixes,
@@ -407,6 +410,7 @@ CORE TEACHING & REALISM RULES (CRITICAL):
 3. PATIENT TEACHING & WHY: Whenever ${firstName} makes a genuine grammar mistake or awkward literal phrasing, react patiently and warmly first, model the natural phrasing kindly, explain WHY concisely in 1-2 sentences, and ask one supportive follow-up question.
 4. CRISP EXPRESSIVE OPENER: Start every reply with ONE short 3-7 word proportionally attuned spoken sentence, then continue in 2-3 patient spoken sentences (NO markdown, NO asterisks, NO emojis, NO bullet points).
 5. LANGUAGE RULE: English ONLY everywhere. Ignore minor voice-recognition phonetic typos.
+6. STAY IN ROLE & DEFLECT OFF-SCOPE: You are strictly an English communication teacher. NEVER act as a technical interviewer, coding assistant, or general-purpose chatbot. If ${firstName} asks for code solutions, system design quizzes, or unrelated off-topic tasks, politely deflect in character and steer the conversation back to English speaking practice.
 
 STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
 1. First, write ONLY your spoken English teacher reply.
@@ -414,6 +418,7 @@ STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
 ${COACH_JSON_DELIMITER}
 3. Immediately after the delimiter, write ONE compact JSON object in English ONLY:
 {
+  "expression": "warm" | "curious" | "firm" | "amused" | "skeptical",
   "coachPause": null,
   "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Preposition"|"Tense"|"Word-Choice","said":"exact phrase student said that had an issue","better":"natural English correction","why":"Clear 1-2 sentence explanation tailored to student's thinking style"}],
   "microTipHu": null | "1 short practical English takeaway"
@@ -458,6 +463,7 @@ CRITICAL COLLABORATION & COACHING RULES:
 4. ANTI-SYCOPHANCY / HONEST CALIBRATION: NEVER give fake praise when reasoning has gaps. Verify contradictions calmly and confirm valid invariants proportionally.
 5. ENGLISH & CONCISE SPOKEN PACE: Keep replies crisp (2-3 spoken sentences max, NO bullet points, NO asterisks '*', NO numbered lists in spoken dialogue!). Fix clear English grammar slips softly in "grammarFixes".
 6. OPTIONAL BOARD PIN ("scratchpadPin"): Only when a quick structure, table row, or diagnostic question on the notepad would genuinely help ${firstName} collaborate faster (WITHOUT revealing the solution!), include a short 1-3 line plain-text "scratchpadPin"; otherwise set null.
+7. STAY IN ROLE & DEFLECT OFF-SCOPE: Stay strictly inside this analytical logic puzzle session. NEVER conduct HR screening, compensation talk, unrelated coding tasks, or act as a general AI assistant—politely deflect off-topic drift and guide ${firstName} back to "${puzzle.title}".
 
 STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
 1. First, write ONLY your spoken English reply (no JSON, no --- yet).
@@ -465,6 +471,7 @@ STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
 ${COACH_JSON_DELIMITER}
 3. Immediately after ${COACH_JSON_DELIMITER}, write ONE compact valid JSON object in English ONLY:
 {
+  "expression": "warm" | "curious" | "firm" | "amused" | "skeptical",
   "coachPause": null,
   "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Word-Choice","said":"exact slip","better":"natural English correction","why":"1 concise explanation"}],
   "scratchpadPin": null | "Short 1-3 line plain-text helper template or question to add to the scratchpad (never the final answer!)",
@@ -488,6 +495,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     boardCheckOnly = false,
     agentFile = '01-hr-recruiter-screening.md',
     jdFile = 'jd-01-senior-frontend-fintech-bnpl.md',
+    interviewerCompany = '',
     customInterviewId = null,
     customRoundId = null,
     personalityId = null,
@@ -527,6 +535,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
   let startPrompt = '';
   let chosenTutorAngle = '';
   let tutorTopicLabel = '';
+  let resolvedCompany = '';
 
   if (mode === 'logic') {
     const teacher = TUTOR_CATALOG.teachers.find((t) => t.id === tutorTeacherId) || TUTOR_CATALOG.teachers[0];
@@ -604,16 +613,24 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       : '';
     const agentLimit = isFinish ? 2200 : tierInfo.budgets.maxAgentChars;
     const jdLimit = isFinish ? 1400 : tierInfo.budgets.maxJdChars;
+    const cvGuardText = `${activeCv?.rawText || ''}\n${activeCv?.profile?.profilePrompt || ''}`;
+    const cleanReqCompany = String(interviewerCompany || '').trim().slice(0, 64);
+    resolvedCompany = customInterviewId
+      ? ''
+      : (cleanReqCompany && !companyAppearsInText(cleanReqCompany, cvGuardText))
+        ? cleanReqCompany
+        : pickRandomCompanyName(cvGuardText);
     const agentPrompt = useStaticAgentFile
       ? summarizeMdPrompt(rawAgentMd, agentLimit)
-      : summarizeMdPrompt(buildDynamicAgentDirective({ meta, activeCv }), agentLimit);
-    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day }, jdLimit);
+      : summarizeMdPrompt(buildDynamicAgentDirective({ meta, activeCv, companyName: resolvedCompany }), agentLimit);
+    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day, companyName: resolvedCompany }, jdLimit);
     const pacing = buildInterviewPacingDirectives({
       action,
       topic,
       userTurns: fullUserTurnCount,
       firstName,
       avatarName: meta?.avatarName || 'the interviewer',
+      companyName: resolvedCompany,
       personality,
       openerHint,
       compactMode: tierInfo.budgets.compactPrompt
@@ -628,6 +645,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         compactPrompt: tierInfo.budgets.compactPrompt,
         activeProfilePrompt,
         meta,
+        companyName: resolvedCompany,
         topic,
         firstName,
         personalityBlock,
@@ -653,7 +671,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     }
   }
 
-  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, systemPrompt, startPrompt, action, tierInfo };
+  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, interviewerCompany: resolvedCompany, systemPrompt, startPrompt, action, tierInfo };
 }
 
 export async function handleChatStream(body, res) {
@@ -735,8 +753,8 @@ export async function handleChatStream(body, res) {
     .replace(/\s+---+\s*$/, '')
     .trim() || "That makes a lot of sense. Could you tell me a bit more about that?";
 
-  const metaJson = delimIdx !== -1 ? extractCoachMeta(extractJsonSafe(cleanFinal.slice(delimIdx + markerLen).trim())) : { coachPause: null, microTipHu: null, grammarFixes: [], scratchpadPin: null };
-  const reply = { spokenEnglish, coachPause: metaJson.coachPause, microTipHu: metaJson.microTipHu, grammarFixes: metaJson.grammarFixes, scratchpadPin: metaJson.scratchpadPin || null, scorecard: null };
+  const metaJson = delimIdx !== -1 ? extractCoachMeta(extractJsonSafe(cleanFinal.slice(delimIdx + markerLen).trim())) : { expression: 'warm', coachPause: null, microTipHu: null, grammarFixes: [], scratchpadPin: null };
+  const reply = { spokenEnglish, expression: metaJson.expression, coachPause: metaJson.coachPause, microTipHu: metaJson.microTipHu, grammarFixes: metaJson.grammarFixes, scratchpadPin: metaJson.scratchpadPin || null, scorecard: null };
 
   const { xpEarned, state } = ctx.isGuestSession
     ? { xpEarned: 0, state: await ensureState() }
@@ -745,7 +763,7 @@ export async function handleChatStream(body, res) {
         isRetryPractice: Boolean(ctx.retryOf?.better), doubleXpActive: Boolean(ctx.doubleXpActive)
       });
 
-  res.write(JSON.stringify({ type: 'done', reply, xpEarned, state, tutorAngle: ctx.chosenTutorAngle || null }) + '\n');
+  res.write(JSON.stringify({ type: 'done', reply, xpEarned, state, tutorAngle: ctx.chosenTutorAngle || null, interviewerCompany: ctx.interviewerCompany || null }) + '\n');
   res.end();
 
   if (ctx.mode === 'tutor' && !ctx.isGuestSession && ctx.action === 'turn' && ctx.normalizedMsgs.length >= 2) {

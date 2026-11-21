@@ -1,5 +1,7 @@
 import { esc } from '../components.js';
 import { $, state } from './state.js';
+import { rollDetailedDna, startDetailedAvatarLoop } from './avatar-detailed.js';
+import { getSpeechLipLevel, getSpeechViseme } from './voice-media.js';
 
 const FEMALE_HAIRSTYLES = ['bob', 'ponytail', 'bun', 'layered', 'pixie'];
 const MALE_HAIRSTYLES = ['quiff', 'parted', 'spiky', 'slick', 'curly'];
@@ -175,8 +177,9 @@ export function rollAppearance(meta, personality, genderOverride = null) {
   const smileMood = /witty|playful/.test(humorId) || /warm|friendly/.test(warmthId) ? 'smile' : 'calm';
   const browMood = vibe === 'bored' ? 'flat' : vibe === 'hardball' || vibe === 'pedantic' ? 'focused' : 'warm';
   const { office, officeFlip } = rollOfficeBackdrop();
-  const sig = `${vibe}-${suit.suitA}-${hairColor.id}-${skinTone.id}-${eyeColor.id}-${hairStyle}-${glasses}-${smileMood}-${browMood}-${office.id}-${officeFlip ? 'flip' : 'std'}`;
-  return { ...suit, ...hairColor, skinTone, eyeColor, hairStyle, glasses, smileMood, browMood, office, officeFlip, sig };
+  const dna = rollDetailedDna(meta, personality, gender);
+  const sig = `${vibe}-${suit.suitA}-${hairColor.id}-${skinTone.id}-${eyeColor.id}-${hairStyle}-${glasses}-${smileMood}-${browMood}-${dna.facialHair}-${office.id}-${officeFlip ? 'flip' : 'std'}`;
+  return { ...suit, ...hairColor, skinTone, eyeColor, hairStyle, glasses, smileMood, browMood, dna, office, officeFlip, sig };
 }
 
 function buildHairPaths(style, prefix, gender, shineColor = 'rgba(255,255,255,0.18)') {
@@ -235,9 +238,9 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
   if (meta.persona === 'tech') {
     torsoDetail = `
       <path d="M84 155 Q110 175 136 155" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="5.5" stroke-linecap="round" />
-      <path d="M98 166 L95 212 M122 166 L125 212" stroke="rgba(255,255,255,0.28)" stroke-width="2.2" stroke-linecap="round" />
-      <rect x="89" y="182" width="42" height="19" rx="7" fill="rgba(15, 23, 42, 0.52)" stroke="${accent}" stroke-width="1.4" />
-      <text x="110" y="195" text-anchor="middle" fill="${accent}" font-size="10" font-weight="800" font-family="ui-monospace, monospace">${badgeText}</text>
+      <path d="M98 166 L96 212 M122 166 L124 212" stroke="rgba(255,255,255,0.28)" stroke-width="2.2" stroke-linecap="round" />
+      <rect x="89" y="191" width="42" height="18" rx="7" fill="rgba(15, 23, 42, 0.52)" stroke="${accent}" stroke-width="1.4" />
+      <text x="110" y="203.5" text-anchor="middle" fill="${accent}" font-size="10" font-weight="800" font-family="ui-monospace, monospace">${badgeText}</text>
     `;
   } else if (meta.tie) {
     torsoDetail = `
@@ -245,8 +248,8 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
       <path d="M82 155 L96 196 L88 214" fill="none" stroke="rgba(15,23,42,0.18)" stroke-width="2.2" stroke-linecap="round" />
       <path d="M138 155 L124 196 L132 214" fill="none" stroke="rgba(15,23,42,0.18)" stroke-width="2.2" stroke-linecap="round" />
       <path d="M106 161 L114 161 L116 194 L110 204 L104 194 Z" fill="${accent}" />
-      <rect x="133" y="177" width="26" height="14" rx="5" fill="rgba(255,255,255,0.20)" />
-      <text x="146" y="187" text-anchor="middle" fill="#ffffff" font-size="8" font-weight="800">${badgeText}</text>
+      <rect x="134" y="190" width="26" height="14" rx="5" fill="rgba(255,255,255,0.20)" />
+      <text x="147" y="200" text-anchor="middle" fill="#ffffff" font-size="8" font-weight="800">${badgeText}</text>
     `;
   } else {
     torsoDetail = `
@@ -254,8 +257,8 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
       <path d="M83 155 L97 195 L91 214" fill="none" stroke="rgba(15,23,42,0.14)" stroke-width="2.2" stroke-linecap="round" />
       <path d="M137 155 L123 195 L129 214" fill="none" stroke="rgba(15,23,42,0.14)" stroke-width="2.2" stroke-linecap="round" />
       <circle cx="110" cy="175" r="3.8" fill="${accent}" />
-      <rect x="132" y="177" width="27" height="14" rx="5" fill="rgba(15,23,42,0.26)" />
-      <text x="145.5" y="187" text-anchor="middle" fill="#ffffff" font-size="8" font-weight="800">${badgeText}</text>
+      <rect x="134" y="190" width="27" height="14" rx="5" fill="rgba(15,23,42,0.26)" />
+      <text x="147.5" y="200" text-anchor="middle" fill="#ffffff" font-size="8" font-weight="800">${badgeText}</text>
     `;
   }
 
@@ -272,8 +275,6 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
   let headsetSvg = '';
   if (meta.headset === 'studio') {
     headsetSvg = `<g><path d="M55 94 C53 43 79 24 110 24 C141 24 167 43 165 94" fill="none" stroke="#1e293b" stroke-width="7.5" stroke-linecap="round" /><rect x="49" y="80" width="14" height="33" rx="7" fill="${accent}" stroke="#0f172a" stroke-width="2.2" /><rect x="157" y="80" width="14" height="33" rx="7" fill="${accent}" stroke="#0f172a" stroke-width="2.2" /><path d="M162 110 Q152 128 126 129" fill="none" stroke="#334155" stroke-width="2.4" stroke-linecap="round" /></g>`;
-  } else if (meta.headset === 'earpiece') {
-    headsetSvg = `<g><circle cx="158" cy="100" r="5.5" fill="#1e293b" /><circle cx="158" cy="100" r="2.3" fill="${accent}" /></g>`;
   }
 
   const mouthPath =
@@ -301,19 +302,22 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
           <stop offset="0%" stop-color="${esc(p.suitA || '#fb7185')}" />
           <stop offset="100%" stop-color="${esc(p.suitB || '#be123c')}" />
         </linearGradient>
+        <linearGradient id="${prefix}-neck" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="${skin.mid}" />
+          <stop offset="100%" stop-color="${skin.shadow}" />
+        </linearGradient>
         <filter id="${prefix}-drop" x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.24" />
         </filter>
       </defs>
+      <g class="avatar-hair-back">${hair.back}</g>
       <g class="avatar-torso" filter="url(#${prefix}-drop)">
         <path d="M16 218 C24 162 58 149 110 149 C162 149 196 162 204 218 Z" fill="url(#${prefix}-suit)" />
         <path d="M32 216 C42 174 68 159 94 157" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="3" stroke-linecap="round" />
         ${torsoDetail}
-        <rect x="97" y="137" width="26" height="23" rx="11" fill="${skin.shadow}" />
-        <path d="M97 144 Q110 152 123 144 L123 139 L97 139 Z" fill="rgba(15,23,42,0.16)" />
+        <rect x="97" y="136" width="26" height="25" rx="11" fill="url(#${prefix}-neck)" />
       </g>
-      <g class="avatar-head-group" filter="url(#${prefix}-drop)">
-        ${hair.back}
+      <g class="avatar-head-group">
         <circle cx="62" cy="98" r="10.5" fill="${skin.mid}" />
         <path d="M58 95 Q61 98 59 102" fill="none" stroke="${skin.earShadow}" stroke-width="1.6" stroke-linecap="round" />
         <circle cx="158" cy="98" r="10.5" fill="${skin.shadow}" />
@@ -384,16 +388,46 @@ function syncOfficeBackdrop(containerEl, appearance = null) {
   containerEl.querySelector('.stage-desk-edge')?.remove();
 }
 
+function mountDetailedCanvas(mountEl, roleLabel, stateGetter) {
+  if (!mountEl) return;
+  let canvas = mountEl.querySelector('canvas.detailed-avatar-canvas');
+  if (!canvas) {
+    mountEl.innerHTML = '';
+    canvas = document.createElement('canvas');
+    canvas.className = 'detailed-avatar-canvas';
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `${roleLabel} — detailed studio interviewer avatar`);
+    mountEl.appendChild(canvas);
+  }
+  startDetailedAvatarLoop(canvas, stateGetter);
+}
+
 export function renderAvatarVisual(force = false) {
   const meta = getActiveAgentMeta(state.lobbyCfg?.agentFile || state.activeSession?.agentFile);
   const voiceKey = state.lobbyCfg ? ($('#lobby-voice-select')?.value || meta.defaultVoice) : (state.activeSession?.voice || meta.defaultVoice);
   const gender = inferVoiceGender(voiceKey);
   const appearance = state.lobbyCfg?.appearance || state.activeSession?.appearance || null;
-  const key = `${meta.id}:${gender}:${appearance?.sig || 'base'}`;
+  const quality = state.user?.avatarQuality === 'detailed' ? 'detailed' : 'standard';
+  const key = `${quality}:${meta.id}:${gender}:${appearance?.sig || 'base'}`;
+
   if (force || key !== lastRenderedAvatarKey) {
     lastRenderedAvatarKey = key;
-    if ($('#call-avatar-mount')) $('#call-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'call', gender, appearance);
-    if ($('#lobby-avatar-mount')) $('#lobby-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'lobby', gender, appearance);
+    if (quality === 'detailed') {
+      const stateGetter = () => ({
+        meta: getActiveAgentMeta(state.lobbyCfg?.agentFile || state.activeSession?.agentFile),
+        gender: inferVoiceGender(state.lobbyCfg ? ($('#lobby-voice-select')?.value || meta.defaultVoice) : (state.activeSession?.voice || meta.defaultVoice)),
+        appearance: state.lobbyCfg?.appearance || state.activeSession?.appearance || null,
+        getMode: () => avatarMode,
+        getExpression: () => state.activeSession?.liveExpression || 'warm',
+        getLipLevel: (now) => getSpeechLipLevel(now),
+        getViseme: (now) => getSpeechViseme(now)
+      });
+      mountDetailedCanvas($('#call-avatar-mount'), meta.avatarName, stateGetter);
+      mountDetailedCanvas($('#lobby-avatar-mount'), meta.avatarName, stateGetter);
+    } else {
+      if ($('#call-avatar-mount')) $('#call-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'call', gender, appearance);
+      if ($('#lobby-avatar-mount')) $('#lobby-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'lobby', gender, appearance);
+    }
   }
   const p = appearance || meta.palette || {};
   const stage = $('#interviewer-stage');

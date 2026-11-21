@@ -968,6 +968,26 @@
               description="Keep dialogue natural while placing English upgrades silently in Coach tips."
               checked
             ></int-toggle>
+
+            <div class="field-group context-tier-group" data-avatar-quality-picker>
+              <div class="context-tier-head">
+                <div class="context-tier-title-wrap">
+                  <span class="field-label" style="margin:0;">🎭 Interviewer Character Detail</span>
+                </div>
+                <span class="badge" id="avatar-quality-badge">Standard (Fast)</span>
+              </div>
+              <div class="tier-seg-grid tier-two-col" role="radiogroup" aria-label="Interviewer Character Detail Level">
+                <button type="button" class="tier-seg-btn is-active" data-avatar-quality="standard" aria-pressed="true">
+                  <strong>⚡ Standard</strong>
+                  <small>Lightweight Vector</small>
+                </button>
+                <button type="button" class="tier-seg-btn" data-avatar-quality="detailed" aria-pressed="false">
+                  <strong>🎬 Detailed Realistic</strong>
+                  <small>HD Studio + Lip-Sync</small>
+                </button>
+              </div>
+              <small class="muted int-field-help">Standard runs smoothly on any device. Detailed Realistic enables multi-pass subsurface skin shading, layered hair strands, facial traits, eye saccades, and live audio lip-sync.</small>
+            </div>
           </int-card>
         </div>
 

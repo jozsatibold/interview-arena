@@ -1,5 +1,6 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { normalizeInterviewTranscript } from '../../shared/transcript.mjs';
+import { buildVisemeTimeline, sampleVisemeTimeline } from '../../shared/viseme.mjs';
 import { $, state } from './state.js';
 import { getAvatarMode, setAvatarState } from './avatar.js';
 
@@ -8,6 +9,124 @@ let speakSeqId = 0;
 const ttsAbortControllers = new Set();
 let ttsQueue = [];
 let ttsPlaying = false;
+let lipCtx = null;
+let lipAnalyser = null;
+let lipData = null;
+let lipTimeData = null;
+let lipAnalyserReadyForEl = false;
+
+let activeSpokenText = '';
+let activeTimeline = [];
+let activeSpeechStartMs = 0;
+let activeEstDurationMs = 2000;
+let activeBoundaryChar = 0;
+let activeBoundaryMs = 0;
+let rmsSlowAvg = 0.045;
+
+function beginUtteranceVisemeTrack(text) {
+  activeSpokenText = String(text || '');
+  activeTimeline = buildVisemeTimeline(activeSpokenText);
+  activeSpeechStartMs = performance.now();
+  const wordCount = Math.max(1, activeSpokenText.trim().split(/\s+/).length);
+  activeEstDurationMs = Math.max(900, wordCount * 380);
+  activeBoundaryChar = 0;
+  activeBoundaryMs = activeSpeechStartMs;
+  rmsSlowAvg = 0.045;
+}
+
+export function getSpeechViseme(timeMs = performance.now()) {
+  if (getAvatarMode() !== 'speaking') return { open: 0, width: 0, round: 0 };
+
+  let textProgress = Math.min(0.98, Math.max(0, (timeMs - activeSpeechStartMs) / Math.max(600, activeEstDurationMs)));
+  if (currentAudio && !currentAudio.paused) {
+    const dur = Number.isFinite(currentAudio.duration) && currentAudio.duration > 0.15
+      ? currentAudio.duration
+      : activeEstDurationMs / 1000;
+    const speechSpan = Math.max(0.25, dur - 0.10);
+    textProgress = Math.max(0, Math.min(0.995, (currentAudio.currentTime - 0.04) / speechSpan));
+  } else if (activeSpokenText.length > 0 && activeBoundaryChar > 0) {
+    const elapsedSinceBoundary = Math.max(0, timeMs - activeBoundaryMs) * 0.014;
+    textProgress = Math.max(0, Math.min(0.995, (activeBoundaryChar + elapsedSinceBoundary) / activeSpokenText.length));
+  }
+  const textV = sampleVisemeTimeline(activeTimeline, textProgress);
+
+  if (lipAnalyser && lipData && lipTimeData && lipAnalyserReadyForEl && currentAudio && !currentAudio.paused) {
+    try {
+      lipAnalyser.getByteTimeDomainData(lipTimeData);
+      let sqSum = 0;
+      for (let i = 0; i < lipTimeData.length; i++) {
+        const centered = (lipTimeData[i] - 128) / 128;
+        sqSum += centered * centered;
+      }
+      const rms = Math.sqrt(sqSum / lipTimeData.length);
+      rmsSlowAvg = rmsSlowAvg * 0.94 + Math.max(0.02, rms) * 0.06;
+
+      // Real silence noise gate + syllable peak contrast ratio
+      if (rms < 0.013) return { open: 0, width: 0, round: 0 };
+      const audioDrive = Math.max(0, Math.min(1, (rms - 0.013) * 5.6));
+      const syllBeat = Math.max(0.45, Math.min(1.45, rms / Math.max(0.022, rmsSlowAvg)));
+
+      lipAnalyser.getByteFrequencyData(lipData);
+      let lowSum = 0;
+      let highSum = 0;
+      for (let i = 1; i <= 7 && i < lipData.length; i++) lowSum += lipData[i];
+      for (let i = 8; i <= 22 && i < lipData.length; i++) highSum += lipData[i];
+      const lowAvg = lowSum / 7;
+      const highAvg = highSum / 15;
+      const ratio = (lowAvg + 6) / (highAvg + 10);
+
+      const audioRound = Math.max(0, Math.min(1, (ratio - 1.15) * 0.75));
+      const audioWidth = Math.max(-0.5, Math.min(1, (1.15 - ratio) * 0.85));
+
+      // Hybrid blend: real audio gates silence & loudness, while text phoneme forces bilabial M/B/P closures and distinct vowel shapes
+      const hybridOpen = textV.close
+        ? Math.min(0.04, audioDrive * 0.08)
+        : Math.max(0, Math.min(1, (audioDrive * 0.42 + textV.open * audioDrive * 0.78) * syllBeat));
+      const shapeAmp = Math.min(1, hybridOpen * 1.35 + 0.1);
+      const hybridRound = Math.max(0, Math.min(1, (textV.round * 0.68 + audioRound * 0.32) * shapeAmp));
+      const hybridWidth = Math.max(-0.5, Math.min(1, (textV.width * 0.68 + audioWidth * 0.32) * shapeAmp));
+      return { open: hybridOpen, width: hybridWidth, round: hybridRound };
+    } catch {}
+  }
+
+  // Hybrid fallback (Browser SpeechSynthesis / unanalysed audio): word-boundary phoneme timeline * syllable modulation
+  const t = timeMs * 0.001;
+  const syllMod = 0.68 + 0.32 * Math.max(-0.4, Math.sin(t * 16.5));
+  const open = textV.close ? 0 : Math.max(0, Math.min(0.96, textV.open * syllMod));
+  return {
+    open,
+    width: textV.width * Math.min(1, open * 1.25),
+    round: textV.round * Math.min(1, open * 1.25)
+  };
+}
+
+export function getSpeechLipLevel(timeMs = performance.now()) {
+  return getSpeechViseme(timeMs).open;
+}
+
+function attachLipAnalyser(audioEl) {
+  lipAnalyserReadyForEl = false;
+  if ((state.user?.avatarQuality || 'standard') !== 'detailed') return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!lipCtx) {
+      lipCtx = new AudioCtx();
+      lipAnalyser = lipCtx.createAnalyser();
+      lipAnalyser.fftSize = 256;
+      lipAnalyser.smoothingTimeConstant = 0.20;
+      lipData = new Uint8Array(lipAnalyser.frequencyBinCount);
+      lipTimeData = new Uint8Array(lipAnalyser.fftSize);
+      lipAnalyser.connect(lipCtx.destination);
+    }
+    if (lipCtx.state === 'suspended') lipCtx.resume().catch(() => {});
+    const src = lipCtx.createMediaElementSource(audioEl);
+    src.connect(lipAnalyser);
+    lipAnalyserReadyForEl = true;
+  } catch {
+    lipAnalyserReadyForEl = false;
+  }
+}
 
 export function getEnglishVoices() {
   if (!('speechSynthesis' in window)) return [];
@@ -42,6 +161,9 @@ export function stopAllSpeech() {
   speakSeqId += 1;
   ttsQueue = [];
   ttsPlaying = false;
+  activeSpokenText = '';
+  activeTimeline = [];
+  activeBoundaryChar = 0;
   for (const ac of ttsAbortControllers) {
     try { ac.abort(); } catch {}
   }
@@ -100,7 +222,18 @@ function playSingleUtteranceFallback(text, mySeq) {
     if (picked) utt.voice = picked;
     utt.lang = 'en-US';
     utt.rate = 1.0;
-    utt.onstart = () => { if (mySeq === speakSeqId) setAvatarState('speaking', 'browser'); };
+    utt.onstart = () => {
+      if (mySeq === speakSeqId) {
+        beginUtteranceVisemeTrack(text);
+        setAvatarState('speaking', 'browser');
+      }
+    };
+    utt.onboundary = (e) => {
+      if (typeof e?.charIndex === 'number') {
+        activeBoundaryChar = e.charIndex;
+        activeBoundaryMs = performance.now();
+      }
+    };
     utt.onend = resolve;
     utt.onerror = resolve;
     window.speechSynthesis.speak(utt);
@@ -122,12 +255,19 @@ async function drainTtsQueue() {
         const url = URL.createObjectURL(res.blob);
         const audio = new Audio(url);
         currentAudio = audio;
+        beginUtteranceVisemeTrack(item.text);
+        attachLipAnalyser(audio);
         const cleanup = () => {
           URL.revokeObjectURL(url);
           if (currentAudio === audio) currentAudio = null;
           resolve();
         };
-        audio.addEventListener('playing', () => { if (mySeq === speakSeqId) setAvatarState('speaking', 'zonos'); }, { once: true });
+        audio.addEventListener('playing', () => {
+          if (mySeq === speakSeqId) {
+            activeSpeechStartMs = performance.now();
+            setAvatarState('speaking', 'zonos');
+          }
+        }, { once: true });
         audio.addEventListener('ended', cleanup, { once: true });
         audio.addEventListener('error', cleanup, { once: true });
         setAvatarState('speaking', 'zonos');

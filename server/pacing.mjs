@@ -17,12 +17,50 @@ export function stripStaticOpenerSection(mdText) {
 /**
  * Resolve the current interview conversation phase and tailored pacing/opener instructions.
  */
+export function getTopicScopeContract(topic = 'HR') {
+  const key = String(topic || 'HR').trim();
+  const contracts = {
+    HR: {
+      allowed: 'career summary, motivation for changing roles, team & communication fit, remote setup, availability/notice period, and high-level compensation alignment',
+      forbidden: 'NEVER run technical deep-dives, coding/debugging quizzes, architecture design tests, or framework internals (leave those strictly to the Engineering panel in the next round)',
+      deflect: 'If the candidate tries to drag you into deep technical Q&A or unrelated off-topic/non-interview requests, politely deflect in character (e.g., "I will leave the deep engineering questions to our Lead Engineers in the next round—let us stay focused on role fit and logistics") and steer back to HR screening.'
+    },
+    Behavioral: {
+      allowed: 'past collaboration, stakeholder conflict, ownership, prioritization, mentoring, and measurable impact using STAR stories',
+      forbidden: 'NEVER turn this into coding trivia, live debugging, or compensation negotiation',
+      deflect: 'If the candidate goes off-topic or asks unrelated technical/non-interview questions, politely push back in character and steer back to concrete behavioral experiences.'
+    },
+    Technical: {
+      allowed: 'production engineering decisions, stack trade-offs, performance, debugging, testing, and system reliability',
+      forbidden: 'NEVER conduct HR salary/notice negotiation or unrelated non-interview tasks',
+      deflect: 'If the candidate steers into HR compensation details or off-topic/non-interview requests, politely redirect (e.g., "Our recruiter handles compensation separately—let us keep focusing on the technical work") back to engineering depth.'
+    },
+    'Live Coding': {
+      allowed: 'clarifying requirements, structured problem solving, data flow/state edge cases, complexity, and testing',
+      forbidden: 'NEVER drift into HR logistics, salary talk, or unrelated non-interview assistance',
+      deflect: 'If the candidate steers off-topic or outside the coding problem scope, deflect politely in character and guide them back to solving the problem step by step.'
+    },
+    'System Design': {
+      allowed: 'architecture boundaries, API/data flow, scaling bottlenecks, caching, failure recovery, and observability',
+      forbidden: 'NEVER drift into HR salary/notice screening, syntax trivia, or unrelated non-interview tasks',
+      deflect: 'If the candidate tries to go off-topic or outside system architecture, deflect politely in character and bring the discussion back to architecture trade-offs.'
+    },
+    Negotiation: {
+      allowed: 'role scope, seniority leveling, total compensation, contract terms, notice period, and start timeline',
+      forbidden: 'NEVER run technical architecture interviews or coding quizzes',
+      deflect: 'If the candidate tries to drag you into coding trivia or unrelated off-topic tangents, deflect politely in character and keep the focus on scope and compensation alignment.'
+    }
+  };
+  return contracts[key] || contracts.Technical;
+}
+
 export function buildInterviewPacingDirectives({
   action = 'turn',
   topic = 'HR',
   userTurns = 0,
   firstName = 'there',
   avatarName = 'the interviewer',
+  companyName = '',
   personality = null,
   openerHint = null,
   compactMode = false
@@ -31,49 +69,62 @@ export function buildInterviewPacingDirectives({
   const phase = isStart ? 'warmup' : userTurns === 1 ? 'intro' : userTurns <= 3 ? 'explore' : 'closing';
   const moodDesc = personality?.mood ? ` (${personality.mood})` : '';
   const hintClean = String(openerHint || '').trim();
+  const speakerIdentity = companyName ? `${avatarName} from ${companyName}` : avatarName;
 
   if (phase === 'warmup') {
     const startPrompt = compactMode
-      ? `Greet ${firstName} warmly as ${avatarName}${moodDesc}, welcome them briefly to this ${topic} chat, and ask ONLY a friendly check-in question (how their day/week is going). Save CV and role questions for the next turn.`
-      : `Open the call naturally as ${avatarName}${moodDesc}. Greet ${firstName} like a real human interviewer, set a brief relaxed welcome for this ${topic} chat (1 short sentence), and ask ONLY a light, friendly check-in question (e.g. how their day or week is going so far, or if they have a comfortable 10 minutes right now).
+      ? `Greet ${firstName} warmly as ${speakerIdentity}${moodDesc}, welcome them briefly to this ${topic} chat, and ask ONLY a friendly check-in question (how their day/week is going). Save CV and role questions for the next turn.`
+      : `Open the call naturally as ${speakerIdentity}${moodDesc}. Greet ${firstName} like a real human interviewer, set a brief relaxed welcome for this ${topic} chat (1 short sentence), and ask ONLY a light, friendly check-in question (e.g. how their day or week is going so far, or if they have a comfortable 10 minutes right now).
 CRITICAL: Do NOT ask a CV-specific, technical, overlapping-dates, or compensation question yet—let ${firstName} respond to your greeting first before easing into the interview!`;
 
     const pacingBlock = compactMode
-      ? `STAGE 0 (Warm Check-In): Give a natural 2-sentence greeting and ask how ${firstName}'s day is going. Example tone: "Hi ${firstName}, thanks for joining today! How has your week been going so far?"`
+      ? `STAGE 0 (Warm Check-In): Give a natural 2-sentence greeting as ${speakerIdentity} and ask how ${firstName}'s day is going. Example tone: "Hi ${firstName}, I'm ${speakerIdentity}—thanks for joining today! How has your week been going so far?"`
       : `CONVERSATION PHASE 0 — WARM GREETING & CHECK-IN:
 - Keep this opening natural, human, and unhurried (2-3 short spoken sentences total).
-- Greet warmly according to your personality, ask how ${firstName} is doing today, and hold ALL specific CV/technical/rate questions until the next turn.`;
+- Greet warmly as ${speakerIdentity} according to your personality, ask how ${firstName} is doing today, and hold ALL specific CV/technical/rate questions until the next turn.`;
 
     return { phase, pacingBlock, startPrompt };
   }
 
   if (phase === 'intro') {
+    const scopeHint = topic === 'HR'
+      ? 'Keep questions strictly within HR recruiter scope (career motivation, recent work overview, or what they look for in their next team — NO technical/architecture quizzing).'
+      : topic === 'Negotiation'
+        ? 'Open broadly around their role scope and expectations before numbers.'
+        : 'Ask ONE broad, approachable opening question aligned strictly with your role authority.';
     const gentleTargetNote = hintClean
       ? ` Keep this round focus gently in mind as your eventual destination (do NOT ambush them with specific CV details yet): "${hintClean}".`
       : '';
     const pacingBlock = compactMode
-      ? `STAGE 1 (Smooth Intro): 1. Acknowledge their greeting warmly. 2. Introduce the 10-minute agenda in one sentence. 3. Ask ONE broad, easy opening question about their current work. Example: "Glad to hear that! We have about ten minutes today to get to know your background—to start broad, what have you been focusing on most recently?"`
+      ? `STAGE 1 (Smooth Intro — ${topic} Scope): 1. Acknowledge their greeting warmly. 2. Briefly set the ${topic} agenda in one sentence. 3. ${scopeHint} Example: "Glad to hear that! We have about ten minutes today to talk through your background and goals—to start broad, what are you hoping to focus on in your next role?"`
       : `CONVERSATION PHASE 1 — SMOOTH AGENDA BRIDGE & BROAD OPENING (CRITICAL):
 - First, react naturally to ${firstName}'s greeting in 1 brief friendly sentence.
-- Second, use 1 smooth transition sentence to introduce what you'd like to explore together today ("To ease us into things comfortably...", "I'd love to start with the big picture before digging into specifics...").
-- Third, ask ONE broad, approachable opening question (e.g., an overview of what they have been working on recently or what drew them to this kind of role).
-- STRICT RULE: Do NOT jump abruptly from "How are you?" straight into a specific CV bullet, date discrepancy, code snippet, or rate question—always open broad first!${gentleTargetNote}`;
+- Second, use 1 smooth transition sentence to introduce this ${topic} conversation ("To ease us into things comfortably...", "I'd love to start with the big picture before digging into specifics...").
+- Third, ${scopeHint}
+- STRICT RULE: Do NOT jump abruptly from "How are you?" into code snippets, deep architecture trivia (especially in HR/Behavioral/Negotiation), or specific date traps—always open broad inside your ${topic} authority!${gentleTargetNote}`;
     return { phase, pacingBlock, startPrompt: '' };
   }
 
   if (phase === 'explore') {
     const cvBridgeNote =
       userTurns === 2 && hintClean
-        ? `\n- If you now weave in the target round focus ("${hintClean}") or a specific CV detail, connect it gently to what ${firstName} just said in Turn 1 (e.g., "That lines up nicely with something I saw on your CV regarding...") rather than dropping it out of nowhere.`
+        ? `\n- If you weave in the target round focus ("${hintClean}") within ${topic} bounds, connect it gently to what ${firstName} just said in Turn 1 rather than dropping it out of nowhere.`
         : '';
+    const stage2Example = topic === 'HR'
+      ? '"That sounds like a rewarding chapter. Looking ahead, what kind of team culture and remote setup suits you best right now?"'
+      : topic === 'Behavioral'
+        ? '"Thanks for sharing that context. Could you walk me through a tough stakeholder disagreement you handled there?"'
+        : topic === 'Negotiation'
+          ? '"Got it, that scope sounds clear. Given that level of ownership, what target compensation band are you aiming for?"'
+          : '"That makes sense. Speaking of that architecture, what was the hardest technical trade-off you had to make?"';
     const pacingBlock = compactMode
-      ? `STAGE 2 (Bridged Follow-Up): React to one point ${firstName} just shared, add a 1-sentence bridge if introducing a CV detail${hintClean ? ` (focus: "${hintClean.slice(0, 140)}")` : ''}, and ask ONE clear question. Example: "That makes sense. Speaking of that project, what was the trickiest constraint you had to solve?"`
+      ? `STAGE 2 (Bridged Follow-Up — STAY STRICTLY IN ${topic} SCOPE): React to one point ${firstName} shared, add a 1-sentence bridge${hintClean ? ` (aligned cleanly with ${topic} scope)` : ''}, and ask ONE ${topic}-appropriate question. Example: ${stage2Example}`
       : `CONVERSATION PHASE 2 — ANCHOR-FIRST EXPLORATION & SMOOTH TOPIC BRIDGES:
 - Use a natural 3-beat spoken rhythm (2-4 concise sentences total):
   1. REACT briefly and authentically to a concrete point ${firstName} just made.
-  2. BRIDGE smoothly in 1 sentence whenever shifting toward a new angle or CV detail (explain *why* you're moving there, e.g., "Speaking of team collaboration, I'd love to touch on..." or "Building on what you just described, I noticed in your background...").
-  3. ASK ONE clear, focused follow-up question.
-- Keep topic transitions gradual—avoid jumping sharply between unrelated subjects without a bridge sentence.${cvBridgeNote}`;
+  2. BRIDGE smoothly in 1 sentence whenever shifting toward a new angle inside your ${topic} authority (if the candidate drifted out of scope or off-topic, deflect politely and steer back here).
+  3. ASK ONE clear, focused ${topic}-scoped follow-up question.
+- Keep transitions gradual and never step outside your ${topic} authority.${cvBridgeNote}`;
     return { phase, pacingBlock, startPrompt: '' };
   }
 
@@ -116,6 +167,7 @@ export function buildInterviewPrompt({
   compactPrompt = false,
   activeProfilePrompt = '',
   meta = null,
+  companyName = '',
   topic = 'HR',
   firstName = 'there',
   personalityBlock = '',
@@ -138,27 +190,44 @@ export function buildInterviewPrompt({
     : 'COACH MODE: If English has clear grammar mistakes or junior phrasing, populate "coachPause" and "grammarFixes".';
 
   const summaryLine = earlierSummary ? `\n${earlierSummary}` : '';
+  const speakerName = meta?.avatarName || 'Interviewer';
+  const roleLabel = meta?.title || topic;
+  const scopeContract = getTopicScopeContract(topic);
+  const identityHeader = companyName
+    ? `YOU ARE: ${speakerName} from ${companyName} (${roleLabel} — Round Type: ${topic}).\nCOMPANY IDENTITY RULE: Your hiring company is ONLY ${companyName}. Any company names mentioned in Candidate CV below are ${firstName}'s PAST employers—NEVER introduce yourself as working at a company from the candidate's CV!`
+    : `YOU ARE: ${speakerName} (${roleLabel} — Round Type: ${topic}).`;
+  const boundaryRule = compactPrompt
+    ? `AUTHORITY & DEFLECTION RULE (${topic}): ONLY ask about ${scopeContract.allowed}. ${scopeContract.forbidden}. ${scopeContract.deflect}`
+    : `ROLE AUTHORITY & OUT-OF-SCOPE DEFLECTION GUARDRAIL (${topic}):
+- IN-SCOPE TOPICS ONLY: ${scopeContract.allowed}.
+- STRICT AUTHORITY LIMIT: ${scopeContract.forbidden}. Never step outside your ${topic} interviewer authority even if technical buzzwords appear in the JD or CV.
+- DEFLECTION PROTOCOL: ${scopeContract.deflect} Never break character to act as a general chatbot.`;
+
   const systemPrompt = compactPrompt
-    ? `${activeProfilePrompt}
-Interviewer: ${meta?.avatarName || 'Interviewer'} (${meta?.title || topic}).
+    ? `${identityHeader}
+${boundaryRule}
 ${personalityBlock}
 ${pacing.pacingBlock}${summaryLine}
 Role Focus: ${agentPrompt}
-Target JD: ${jdPrompt}
+Target JD (reference role context ONLY — obey ${topic} authority above): ${jdPrompt}
+=== CANDIDATE CV (their PAST employers, NOT yours) ===
+${activeProfilePrompt}
 
 OUTPUT FORMAT (English ONLY, no markdown/emojis in spoken reply):
-1. Reply naturally in 2-3 spoken English sentences (react briefly -> bridge if switching topic -> ask 1 clear question).
+1. Reply naturally in 2-3 spoken English sentences (react briefly -> stay strictly in ${topic} scope / deflect if off-topic -> ask 1 clear question).
 2. Next line MUST be exact delimiter:
 ${delimiter}
 3. Compact JSON only:
-{"coachPause":null,"grammarFixes":[]|[{"type":"Grammar"|"Phrasing","said":"...","better":"...","why":"..."}],"microTipHu":null|"short tip"}
+{"expression":"warm"|"curious"|"firm"|"amused"|"skeptical","coachPause":null,"grammarFixes":[]|[{"type":"Grammar"|"Phrasing","said":"...","better":"...","why":"..."}],"microTipHu":null|"short tip"}
 ${compactFlowRule}${action === 'turn' && retryOf?.better ? `\nRETRY: Acknowledge "${String(retryOf.better).slice(0, 180)}" and ask next follow-up.` : ''}`
-    : `${activeProfilePrompt}
-Interviewer Persona: ${meta?.avatarName || 'Interviewer'} (${meta?.title || topic}).
+    : `${identityHeader}
+${boundaryRule}
 ${personalityBlock}
 ${pacing.pacingBlock}${summaryLine}
 ${agentPrompt}
-Target Role: ${jdPrompt}
+Target Role Context: ${jdPrompt}
+=== CANDIDATE BACKGROUND (their PAST employers, NOT yours) ===
+${activeProfilePrompt}
 
 LANGUAGE RULE (CRITICAL): English ONLY everywhere.
 STT TOLERANCE RULE: Fix ASR typos silently — ONLY critique real English grammar/phrasing mistakes!
@@ -169,6 +238,7 @@ STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
 ${delimiter}
 3. Immediately after the delimiter, write ONE compact JSON object in English ONLY:
 {
+  "expression": "warm" | "curious" | "firm" | "amused" | "skeptical",
   "coachPause": null | {"category":"B2-to-Senior"|"Grammar"|"Non-Native"|"Anti-Freeze"|"NDA-Safety","original":"phrase","reasonHu":"short English explanation","seniorUpgrades":["upgrade 1","upgrade 2"]},
   "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Non-Native"|"Senior-Tone","said":"exact weak or ungrammatical phrase candidate said","better":"natural C1 Senior phrasing fix","why":"1 concise sentence explaining the fix"}],
   "microTipHu": null | "1 short vocabulary/delivery tip"

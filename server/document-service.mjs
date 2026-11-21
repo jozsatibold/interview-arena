@@ -208,7 +208,7 @@ export async function buildCvResponseBundle(versions = null) {
   };
 }
 
-export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fintech-bnpl.md', customInterviewId = null, customRoundId = null, day = null }, maxChars = 1300) {
+export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fintech-bnpl.md', customInterviewId = null, customRoundId = null, day = null, companyName = '' }, maxChars = 1300) {
   if (customInterviewId) {
     const custom = (await ensureCustomInterviews()).find((c) => c.id === customInterviewId);
     if (custom) {
@@ -239,6 +239,13 @@ export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fin
   if (!baseJdText) {
     const staticPath = path.join(ROOT_DIR, 'job-descriptions', path.basename(jdFile || 'jd-01-senior-frontend-fintech-bnpl.md'));
     if (existsSync(staticPath)) baseJdText = await fs.readFile(staticPath, 'utf8');
+  }
+  const cleanCompany = String(companyName || '').trim();
+  if (cleanCompany) {
+    const hasCompanyLine = /\*\*Company:\*\*/i.test(baseJdText);
+    baseJdText = hasCompanyLine
+      ? baseJdText.replace(/\*\*Company:\*\*[^\n]*/i, `**Company:** ${cleanCompany}`)
+      : `**Company:** ${cleanCompany}\n${baseJdText}`;
   }
   return {
     jdPrompt: `${summarizeMdPrompt(baseJdText, maxChars)}${dayFocusBlock}`,

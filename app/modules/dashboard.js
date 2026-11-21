@@ -1,7 +1,7 @@
 import { apiJson, esc, fillSelectOptions, saveUserState, consumeNdjsonStream } from '../components.js';
 import { resolveEffectiveContextTier, LLM_CONTEXT_TIERS } from '/shared/model-tiers.mjs';
 import { $, $$, state, getCandidateIdentity, syncLinkedSelectGroup } from './state.js';
-import { updateAvatarStage } from './avatar.js';
+import { updateAvatarStage, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, speakEnglish } from './voice-media.js';
 import { renderHud } from './stats-shop.js';
 import { buildJdBriefHtml, stopLobbyMicTest, openLobby } from './lobby.js';
@@ -251,6 +251,20 @@ function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
   }
 }
 
+export function syncAvatarQualityPicker() {
+  const quality = state.user?.avatarQuality === 'detailed' ? 'detailed' : 'standard';
+  const badge = $('#avatar-quality-badge');
+  if (badge) {
+    badge.textContent = quality === 'detailed' ? 'Detailed Realistic' : 'Standard (Fast)';
+    badge.className = `badge ${quality === 'detailed' ? 'badge-green' : ''}`;
+  }
+  for (const btn of $$('[data-avatar-quality]')) {
+    const active = btn.dataset.avatarQuality === quality;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  }
+}
+
 export function renderSettingsPage() {
   const s = state.setup;
   if (!s) return;
@@ -322,6 +336,7 @@ export function renderSettingsPage() {
   renderTargetModelSelectors();
   renderOnboardingSetupState(s, tiles, chatModelOptions, isReady);
   syncContextTierPickers();
+  syncAvatarQualityPicker();
 
   if ($('#voice-tools-note')) {
     $('#voice-tools-note').textContent = `${s.voiceTools.browserSpeechNote}` +
@@ -508,6 +523,18 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
     }
   }
 
+  for (const btn of $$('[data-avatar-quality]')) {
+    btn.addEventListener('click', async () => {
+      const nextQ = btn.dataset.avatarQuality === 'detailed' ? 'detailed' : 'standard';
+      if (state.user) state.user.avatarQuality = nextQ;
+      syncAvatarQualityPicker();
+      renderAvatarVisual(true);
+      try {
+        state.user = await saveUserState({ avatarQuality: nextQ });
+      } catch {}
+    });
+  }
+
   $('#model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
   $('#onb-setup-model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
   $('#custom-model-input')?.addEventListener('input', (e) => syncContextTierPickers(e.target.value));
@@ -517,6 +544,7 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
     state.user = await saveUserState({
       selectedModel: $('#custom-model-input')?.value.trim() || $('#model-select')?.value,
       modelContextTier: state.user?.modelContextTier || 'auto',
+      avatarQuality: state.user?.avatarQuality || 'standard',
       plannerModel: $('#settings-planner-model')?.value || $('#planner-model-select')?.value || '',
       visionModel: $('#settings-vision-model')?.value || $('#vision-model-select')?.value || '',
       preferredVoice: $('#voice-select')?.value || '',

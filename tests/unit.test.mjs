@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeInterviewTranscript } from '../shared/transcript.mjs';
+import { buildVisemeTimeline, sampleVisemeTimeline } from '../shared/viseme.mjs';
+import { pickRandomCompanyName, companyAppearsInText } from '../shared/company.mjs';
 import {
   CURATED_LOGIC_PUZZLES,
   getPublicLogicPuzzles,
@@ -25,12 +27,15 @@ import {
 import {
   stripStaticOpenerSection,
   buildInterviewPacingDirectives,
-  trimConversationForTier
+  trimConversationForTier,
+  buildInterviewPrompt,
+  getTopicScopeContract
 } from '../server/pacing.mjs';
 import {
   detectModelParamBillions,
   resolveEffectiveContextTier
 } from '../shared/model-tiers.mjs';
+import { rollDetailedDna, getExpressionTargets } from '../app/modules/avatar-detailed.js';
 import { detectRoleArchetype, getAdaptedAgents } from '../role-adapter.mjs';
 import { AGENT_META } from '../server/config.mjs';
 
@@ -164,4 +169,87 @@ test('LLM size scraper and context tier optimizer classify Small/Medium/Large an
   const trimmed = trimConversationForTier(msgs, 6);
   assert.equal(trimmed.recentMessages.length, 6);
   assert.ok(trimmed.earlierSummary.includes('Turn 0'));
+});
+
+test('detailed avatar DNA generates bounded anatomy traits cleanly for male and female personas', () => {
+  const fDna = rollDetailedDna({}, null, 'female');
+  assert.equal(fDna.facialHair, 'none');
+  assert.ok(fDna.faceWidthScale >= 0.94 && fDna.faceWidthScale <= 1.06);
+  assert.ok(fDna.browHeight >= -3 && fDna.browHeight <= 3);
+
+  const mDna = rollDetailedDna({}, null, 'male');
+  assert.equal(mDna.earrings, false);
+  assert.ok(['none', 'stubble', 'trimmed-beard'].includes(mDna.facialHair));
+});
+
+test('hybrid lip-sync timeline models bilabial closures and distinct vowel visemes', () => {
+  const frames = buildVisemeTimeline('Boom, see?');
+  assert.ok(frames.length >= 6);
+  // 'b' bilabial seal, 'oo' round vowel, 'm' bilabial seal, ',' rest, 'ee' wide vowel, '?' rest
+  assert.equal(frames[0].close, true);
+  assert.equal(frames[0].open, 0);
+  assert.ok(frames[1].round > 0.8);
+  assert.equal(frames[2].close, true);
+  assert.ok(frames.some((f) => f.width > 0.8));
+  assert.equal(frames[frames.length - 1].end, 1);
+
+  const sampledRound = sampleVisemeTimeline(frames, frames[1].start + 0.01);
+  assert.ok(sampledRound.round > 0.7);
+});
+
+test('random company picker avoids CV employers and anchors interviewer identity before CV in compact prompts', () => {
+  const cvText = 'Senior Frontend Engineer at OptiMonk and Northbridge Pay with TypeScript experience.';
+  for (let i = 0; i < 20; i++) {
+    const company = pickRandomCompanyName(cvText);
+    assert.equal(companyAppearsInText(company, cvText), false);
+    assert.ok(!/optimonk/i.test(company));
+  }
+
+  const pacing = buildInterviewPacingDirectives({
+    action: 'start',
+    topic: 'HR',
+    userTurns: 0,
+    firstName: 'Jozsa',
+    avatarName: 'Maya',
+    companyName: 'Kestrel Cloud',
+    compactMode: true
+  });
+  assert.ok(pacing.startPrompt.includes('Maya from Kestrel Cloud'));
+
+  const built = buildInterviewPrompt({
+    compactPrompt: true,
+    activeProfilePrompt: 'Candidate worked at OptiMonk.',
+    meta: { avatarName: 'Maya', title: 'Internal Talent Partner' },
+    companyName: 'Kestrel Cloud',
+    topic: 'HR',
+    firstName: 'Jozsa',
+    pacing
+  });
+  const idIdx = built.systemPrompt.indexOf('YOU ARE: Maya from Kestrel Cloud');
+  const cvIdx = built.systemPrompt.indexOf('Candidate worked at OptiMonk.');
+  assert.ok(idIdx >= 0 && cvIdx > idIdx);
+
+  const hrScope = getTopicScopeContract('HR');
+  assert.match(hrScope.forbidden, /NEVER run technical deep-dives/i);
+  assert.match(built.systemPrompt, /AUTHORITY & DEFLECTION RULE \(HR\)/);
+  assert.match(built.systemPrompt, /NEVER run technical deep-dives/i);
+
+  const hrExplore = buildInterviewPacingDirectives({
+    action: 'turn',
+    topic: 'HR',
+    userTurns: 2,
+    firstName: 'Jozsa',
+    avatarName: 'Maya',
+    companyName: 'Kestrel Cloud',
+    compactMode: true
+  });
+  assert.ok(!/trickiest constraint/i.test(hrExplore.pacingBlock));
+  assert.match(hrExplore.pacingBlock, /STAY STRICTLY IN HR SCOPE/);
+  assert.match(built.systemPrompt, /"expression":"warm"\|"curious"\|"firm"\|"amused"\|"skeptical"/);
+
+  const curious = getExpressionTargets('curious');
+  assert.ok(curious.browRaiseL < curious.browRaiseR);
+  const skeptical = getExpressionTargets('skeptical');
+  assert.ok(skeptical.smileBias < 0 && skeptical.browRaiseL > skeptical.browRaiseR);
+  assert.deepEqual(getExpressionTargets('nonexistent'), getExpressionTargets('warm'));
 });
