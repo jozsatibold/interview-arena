@@ -1,6 +1,6 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
-import { getTopicUiLabels } from '../../shared/role-archetypes.mjs';
+import { getTopicUiLabels, getLeadershipTier } from '../../shared/role-archetypes.mjs';
 import { getActiveAgentMeta, inferVoiceGender, rollAppearance, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, stopAllSpeech, speakEnglish, ensureMediaStream, toggleCamera, toggleMicrophone, stopMicMeter, stopMediaStream } from './voice-media.js';
 
@@ -251,10 +251,16 @@ export async function openLobby(cfg, switchToView) {
   if ($('#lobby-exam-toggle')) {
     $('#lobby-exam-toggle').checked = Boolean(state.user?.defaultExamMode);
   }
+  const effArchKey = state.catalog?.effectiveArchKey || 'general';
+  const leadershipTier = getLeadershipTier(effArchKey);
   if ($('#lobby-duration-select')) {
-    $('#lobby-duration-select').value = String(state.user?.defaultDurationMinutes || 12);
+    const savedDur = Number(state.user?.defaultDurationMinutes || 12);
+    const tierDur = savedDur === 12
+      ? (leadershipTier === 'executive' ? 25 : leadershipTier === 'manager' ? 15 : 12)
+      : savedDur;
+    $('#lobby-duration-select').value = String(tierDur);
   }
-  const topicLabels = getTopicUiLabels(state.catalog?.effectiveArchKey || 'general');
+  const topicLabels = getTopicUiLabels(effArchKey);
   $('#lobby-role-badge').textContent = `${meta.code} · ${topicLabels[meta.topic] || meta.topic}`;
   if ($('#lobby-voice-badge')) $('#lobby-voice-badge').textContent = `Voice: ${presetVoice}`;
   $('#lobby-avatar-name').textContent = `${meta.avatarName} · ${meta.title}`;

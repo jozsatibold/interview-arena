@@ -94,6 +94,59 @@ export function resolveTopicUiLabelsForCategory(cat = 'engineering', archKey = '
   return { HR: 'HR & Pitch', Behavioral: 'Behavioral', Technical: 'Technical', 'Live Coding': 'Live Coding', 'System Design': 'System Design', Negotiation: 'Negotiation' };
 }
 
+export function getLeadershipTier(archKey = 'general') {
+  const key = String(archKey || 'general').trim();
+  if (['ceo', 'coo', 'cto', 'cfo', 'cro'].includes(key)) return 'executive';
+  if (['em', 'tpm', 'people'].includes(key)) return 'manager';
+  return 'ic';
+}
+
+export const EXECUTIVE_PATH_BLUEPRINT = [
+  { day: 1, title: 'Executive Search Calibration', topic: 'HR', agent: '01-hr-recruiter-screening.md', focus: 'Establish company stage fit ($10M->$100M ARR), Board mandate clarity, and C-suite compensation anchor.' },
+  { day: 2, title: 'P&L, Burn & Unit Economics', topic: 'Technical', agent: '03-technical-deep-dive-architecture.md', focus: 'Defend Burn Multiple, GRR vs NRR cohort health, gross margin levers, and capital allocation rules.' },
+  { day: 3, title: 'First 100-Day Plan Defense', topic: 'Live Coding', agent: '04-live-coding-anti-freeze-trainer.md', focus: 'Present and defend Days 1-30 diagnostics, 31-60 exec bench upgrades, and Days 61-100 Board KPI reset.' },
+  { day: 4, title: 'Multi-Year Org & Operating Model', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Design executive leadership structure, functional vs GM boundaries, and single-threaded ownership.' },
+  { day: 5, title: 'Executive Equity & Bonus Terms', topic: 'Negotiation', agent: '06-salary-contract-negotiation.md', focus: 'Calibrate base vs performance bonus, option/RSU strike dilution, and double-trigger acceleration.' },
+  { day: 6, title: 'VC / PE Operating Partner Screen', topic: 'HR', agent: '01b-hr-agency-headhunter.md', focus: 'Pass private-equity / VC operating partner diligence on cash discipline and operational speed.' },
+  { day: 7, title: 'Hard Turnarounds & Missed Quarters', topic: 'Behavioral', agent: '02-behavioral-leadership-star.md', focus: 'Walk candidly through firing an exec hire, cutting burn 20%, and resetting Board expectations.' },
+  { day: 8, title: 'C-Suite Peer Tension: Deal vs Margin', topic: 'Technical', agent: '03c-tech-nodejs-payments-testing.md', focus: 'Resolve CRO vs CFO vs CTO conflict over bespoke enterprise asks eroding gross margin.' },
+  { day: 9, title: 'Boardroom Crisis & Runway Triage', topic: 'Live Coding', agent: '04b-live-coding-data-state-analytics.md', focus: 'Run live triage on a sharp NRR dip and 1.9x->2.5x burn spike under investor skepticism.' },
+  { day: 10, title: 'Board Chair Thesis & Chemistry', topic: 'HR', agent: '01c-hr-founder-vp-chemistry.md', focus: 'Align with the Board Chair / CEO on vision, governance candor, and mutual due diligence.' },
+  { day: 11, title: 'GTM, Pricing Power & ICP Shift', topic: 'Technical', agent: '03b-tech-angular-nx-rxjs.md', focus: 'Sharpen category wedge, enterprise vs SMB churn trade-offs, and net expansion pricing lifts.' },
+  { day: 12, title: 'C-Suite Alignment & Peer Buy-In', topic: 'Behavioral', agent: '02b-behavioral-product-and-growth.md', focus: 'Demonstrate uniting Product, Engineering, Finance, and Revenue behind a single annual bet.' },
+  { day: 13, title: 'Enterprise Risk & Audit Triage', topic: 'Technical', agent: '03d-tech-bug-triage-and-pr-review.md', focus: 'Diagnose margin leaks, SLA collapses, or SOC2/audit failures rapidly with clear DRI accountability.' },
+  { day: 14, title: 'Geo Expansion & M&A Integration', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Evaluate build-vs-buy M&A thesis, post-merger culture integration, and multi-region risk gates.' },
+  { day: 15, title: 'Executive Deal & M&A Case', topic: 'Live Coding', agent: '04c-live-coding-widgets-dom-maps.md', focus: 'Negotiate high-stakes pricing restructure or M&A integration bottleneck live under pressure.' },
+  { day: 16, title: 'CEO / Board Chair Reverse Diligence', topic: 'HR', agent: '01c-hr-founder-vp-chemistry.md', focus: 'Interrogate Board alignment, unstated political conflicts, true runway, and decision autonomy.' },
+  { day: 17, title: '360° Failures & Backchannel Audit', topic: 'Behavioral', agent: '02-behavioral-leadership-star.md', focus: 'Answer tough backchannel reference probes about your sharpest executive blind spots honestly.' },
+  { day: 18, title: 'Long-Horizon Scaling & Governance', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Architect multi-year R&D, GTM, and Board reporting cadence for predictable Rule-of-40 compounding.' },
+  { day: 19, title: 'Board Mandate, Severance & Vesting', topic: 'Negotiation', agent: '06b-negotiation-eu-b2b-contracts.md', focus: 'Close governance charter, change-of-control protections, good-leaver severance, and board observer rights.' },
+  { day: 20, title: 'Final Executive Comp & Start Close', topic: 'Negotiation', agent: '06-salary-contract-negotiation.md', focus: 'Lock final package structure, sign-on bonus bridge, and Day-1 executive transition plan.' }
+];
+
+export const MANAGER_PATH_BLUEPRINT = [
+  { day: 1, title: 'Leadership Scope & Stage Screen', topic: 'HR', agent: '01-hr-recruiter-screening.md', focus: 'Validate span of control (1 vs 3 squads), people-vs-tech ratio, and async remote management habits.' },
+  { day: 2, title: 'Delivery, DORA & WIP Governance', topic: 'Technical', agent: '03-technical-deep-dive-architecture.md', focus: 'Establish predictable sprint flow without heroics, PR batch hygiene, and 15-20% reliability budgets.' },
+  { day: 3, title: 'Live Roleplay: Underperformer PIP', topic: 'Live Coding', agent: '04-live-coding-anti-freeze-trainer.md', focus: 'Deliver direct SBI feedback to a defensive high-tenure report without drifting into vagueness.' },
+  { day: 4, title: 'Hard People & Retention STAR', topic: 'Behavioral', agent: '02-behavioral-leadership-star.md', focus: 'Walk through turning around a struggling senior IC or managing a regrettable/necessary exit fairly.' },
+  { day: 5, title: 'Multi-Squad Org & On-Call Scale', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Design stream-aligned squad topology, sustainable on-call rotations, and clear DRIs across 25+ people.' },
+  { day: 6, title: 'VP / Director Managing-Up Chemistry', topic: 'HR', agent: '01c-hr-founder-vp-chemistry.md', focus: 'Demonstrate translating messy executive ambiguity into crisp team clarity and candid upward risk.' },
+  { day: 7, title: 'Cross-Functional PM Conflict', topic: 'Behavioral', agent: '02b-behavioral-product-and-growth.md', focus: 'Negotiate mid-sprint scope injection with Product/Sales cleanly via explicit scope-vs-date swaps.' },
+  { day: 8, title: 'Live Roleplay: Burnout & Resignation', topic: 'Live Coding', agent: '04b-live-coding-data-state-analytics.md', focus: 'De-escalate a key Tech Lead threatening resignation over urgent hotfixes and hidden tech debt.' },
+  { day: 9, title: 'Hiring Bar, Scorecards & Calibration', topic: 'Technical', agent: '03b-tech-angular-nx-rxjs.md', focus: 'Design structured interview rubrics preventing gut-feel hiring and eliminating uncalibrated bias.' },
+  { day: 10, title: 'M3/M4 Leveling & Scope Offer', topic: 'Negotiation', agent: '06-salary-contract-negotiation.md', focus: 'Calibrate management band, hiring headcount authority, equity refreshers, and reporting line.' },
+  { day: 11, title: 'Risk, RAID & Blameless Postmortems', topic: 'Technical', agent: '03c-tech-nodejs-payments-testing.md', focus: 'Turn Sev-1 incidents into systemic guardrails and surface red dependencies weeks before slippage.' },
+  { day: 12, title: 'Cross-Org Conflict & Escalations', topic: 'Behavioral', agent: '02-behavioral-leadership-star.md', focus: 'Resolve deadlocks between Platform/Security/Product teams with clear written ADR/RAID ownership.' },
+  { day: 13, title: 'Execution Audit & Attrition Triage', topic: 'Technical', agent: '03d-tech-bug-triage-and-pr-review.md', focus: 'Diagnose rising CFR, slowing cycle time, or localized attrition spikes using objective telemetry.' },
+  { day: 14, title: 'Live Scenario: Mid-Sprint Crisis', topic: 'Live Coding', agent: '04c-live-coding-widgets-dom-maps.md', focus: 'Re-baseline delivery plan live after a 3-week external API or InfoSec dependency slips unexpectedly.' },
+  { day: 15, title: 'Career Ladders & Performance OS', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Design fair IC vs EM growth ladders, promotion calibration, and onboarding ramp metrics.' },
+  { day: 16, title: 'Stakeholder Empathy & Pushback', topic: 'Behavioral', agent: '02b-behavioral-product-and-growth.md', focus: 'Show how you protected engineering focus while still helping Commercial teams hit revenue goals.' },
+  { day: 17, title: 'Live Scenario: Unfair Comp / Counteroffer', topic: 'Live Coding', agent: '04-live-coding-anti-freeze-trainer.md', focus: 'Navigate a top performer counteroffer cleanly without breaking internal band equity.' },
+  { day: 18, title: '10->50 Person Scaling Operating Model', topic: 'System Design', agent: '05-system-design-fintech-saas.md', focus: 'Prevent process bloat while keeping multi-team dependencies visible during rapid org growth.' },
+  { day: 19, title: 'Headcount Budget & Comp Band Terms', topic: 'Negotiation', agent: '06b-negotiation-eu-b2b-contracts.md', focus: 'Negotiate guaranteed hiring reqs, retention budget, and clear charter before signing.' },
+  { day: 20, title: 'Final VP Offer & 90-Day Mandate Close', topic: 'Negotiation', agent: '06-salary-contract-negotiation.md', focus: 'Close final compensation and ask incisive due-diligence questions about VP alignment.' }
+];
+
 function makeExtraFakeJobs(roleTitle, domainPrefix, compFallback, companies) {
   return companies.map(([company, customTitle, domain, resp]) => ({
     company,

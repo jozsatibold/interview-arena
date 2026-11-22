@@ -6,10 +6,13 @@
 import {
   EXTRA_ROLE_ARCHETYPES,
   ROLE_TRACK_GROUPS,
-  resolveTopicUiLabelsForCategory
+  resolveTopicUiLabelsForCategory,
+  getLeadershipTier,
+  EXECUTIVE_PATH_BLUEPRINT,
+  MANAGER_PATH_BLUEPRINT
 } from './role-archetypes-extra.mjs';
 
-export { ROLE_TRACK_GROUPS };
+export { ROLE_TRACK_GROUPS, getLeadershipTier, EXECUTIVE_PATH_BLUEPRINT, MANAGER_PATH_BLUEPRINT };
 
 function makeFakeJobs(roleTitle, domainPrefix, compFallback, companies) {
   return companies.map(([company, customTitle, domain, resp]) => ({

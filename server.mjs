@@ -180,7 +180,7 @@ function applyStatePatch(state, patch) {
   if (patch.callAmbientAudio !== undefined) state.callAmbientAudio = Boolean(patch.callAmbientAudio);
   if (['manual', 'ptt', 'handsfree'].includes(patch.micMode)) state.micMode = patch.micMode;
   if (['spotlight', 'split'].includes(patch.defaultLayout)) state.defaultLayout = patch.defaultLayout;
-  if ([8, 12, 15, 25].includes(Number(patch.defaultDurationMinutes))) state.defaultDurationMinutes = Number(patch.defaultDurationMinutes);
+  if ([8, 12, 15, 25, 30, 45].includes(Number(patch.defaultDurationMinutes))) state.defaultDurationMinutes = Number(patch.defaultDurationMinutes);
   if (typeof patch.targetRoleTrack === 'string') {
     const cleanTrack = patch.targetRoleTrack.trim();
     if (cleanTrack === 'auto' || Object.hasOwn(ROLE_ARCHETYPES, cleanTrack)) {

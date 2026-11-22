@@ -258,7 +258,7 @@ function upsertUserProfileSync(db, state) {
     state.callAmbientAudio ? 1 : 0,
     ['manual', 'ptt', 'handsfree'].includes(state.micMode) ? state.micMode : 'manual',
     ['spotlight', 'split'].includes(state.defaultLayout) ? state.defaultLayout : 'spotlight',
-    [8, 12, 15, 25].includes(Number(state.defaultDurationMinutes)) ? Number(state.defaultDurationMinutes) : 12,
+    [8, 12, 15, 25, 30, 45].includes(Number(state.defaultDurationMinutes)) ? Number(state.defaultDurationMinutes) : 12,
     String(state.targetRoleTrack || 'auto').slice(0, 32),
     JSON.stringify(state.powerUps || DEFAULT_STATE.powerUps),
     JSON.stringify(Array.isArray(state.completedDays) ? state.completedDays : [])
@@ -396,7 +396,7 @@ function readStateSync(db) {
     callAmbientAudio: Boolean(row.call_ambient_audio),
     micMode: ['manual', 'ptt', 'handsfree'].includes(row.mic_mode) ? row.mic_mode : 'manual',
     defaultLayout: ['spotlight', 'split'].includes(row.default_layout) ? row.default_layout : 'spotlight',
-    defaultDurationMinutes: [8, 12, 15, 25].includes(Number(row.default_duration_minutes)) ? Number(row.default_duration_minutes) : 12,
+    defaultDurationMinutes: [8, 12, 15, 25, 30, 45].includes(Number(row.default_duration_minutes)) ? Number(row.default_duration_minutes) : 12,
     targetRoleTrack: String(row.target_role_track || 'auto'),
     powerUps: { ...DEFAULT_STATE.powerUps, ...JSON.parse(row.power_ups_json || '{}') },
     completedDays: JSON.parse(row.completed_days_json || '[]'),

@@ -18,6 +18,7 @@ import {
   buildCvAnalysisPrompt,
   buildFakeJobPrompt
 } from '../role-adapter.mjs';
+import { getLeadershipTier } from '../shared/role-archetypes.mjs';
 import {
   ROOT_DIR,
   DATA_DIR,
@@ -440,17 +441,39 @@ export async function generateFakeJobForActiveCv({ customFocus = '', plannerMode
   return { createdJd, ...(await buildCvResponseBundle()) };
 }
 
-function normalizeGeneratedRounds(rawRounds, company, roleTitle) {
-  const isNonCode = /\b(ceo|coo|cto|cfo|cro|product manager|product owner|designer|ux|marketing|pmm|sales|account executive|customer success|csm|tam|people|hrbp|recruiter|scrum|program manager|tpm|engineering manager)\b/i.test(String(roleTitle || ''));
-  const defaultRoster = [
+export function normalizeGeneratedRounds(rawRounds, company, roleTitle, leadershipTier = null) {
+  const cleanTitle = String(roleTitle || '');
+  const detectedArch = detectRoleArchetype(cleanTitle, { headline: cleanTitle });
+  const tier = leadershipTier || getLeadershipTier(detectedArch);
+  const isNonCode = tier !== 'ic' || /\b(product manager|product owner|designer|ux|marketing|pmm|sales|account executive|customer success|csm|tam|people|hrbp|recruiter|scrum)\b/i.test(cleanTitle);
+
+  const execRoster = [
+    { topic: 'HR', agentId: '01-hr-recruiter-screening.md', title: 'Round 1: Executive Search & Mandate Calibration' },
+    { topic: 'HR', agentId: '01c-hr-founder-vp-chemistry.md', title: 'Round 2: Board Chair / CEO Thesis & Chemistry' },
+    { topic: 'Technical', agentId: '03c-tech-nodejs-payments-testing.md', title: 'Round 3: C-Suite Peer Cross-Examination (CFO/CRO/CPO Tension)' },
+    { topic: 'Live Coding', agentId: '04-live-coding-anti-freeze-trainer.md', title: 'Round 4: First 100-Day Plan & Board Memo Defense' },
+    { topic: 'System Design', agentId: '05-system-design-fintech-saas.md', title: 'Round 5: Multi-Year Org, Unit Economics & Operating Model' },
+    { topic: 'Behavioral', agentId: '02-behavioral-leadership-star.md', title: 'Round 6: Hard Turnarounds, Exec Exits & 360 Backchannel Audit' },
+    { topic: 'Negotiation', agentId: '06b-negotiation-eu-b2b-contracts.md', title: 'Round 7: Equity Waterfall, Acceleration & Board Mandate Close' }
+  ];
+  const managerRoster = [
+    { topic: 'HR', agentId: '01-hr-recruiter-screening.md', title: 'Round 1: Leadership Scope & Org Stage Screen' },
+    { topic: 'HR', agentId: '01c-hr-founder-vp-chemistry.md', title: 'Round 2: VP / Director Alignment & Managing Up' },
+    { topic: 'Live Coding', agentId: '04-live-coding-anti-freeze-trainer.md', title: 'Round 3: Live People Coaching & Retention Roleplay' },
+    { topic: 'Behavioral', agentId: '02b-behavioral-product-and-growth.md', title: 'Round 4: Cross-Functional Peer Panel (PM / Sales / Design)' },
+    { topic: 'System Design', agentId: '05-system-design-fintech-saas.md', title: 'Round 5: Delivery Governance, Hiring Bar & Org Scaling' },
+    { topic: 'Negotiation', agentId: '06-salary-contract-negotiation.md', title: 'Round 6: Leveling (M3/M4), Headcount Budget & Offer' }
+  ];
+  const icRoster = [
     { topic: 'HR', agentId: '01-hr-recruiter-screening.md', title: 'Round 1: Recruiter & Mandate Screen' },
     { topic: 'Technical', agentId: '03-technical-deep-dive-architecture.md', title: isNonCode ? 'Round 2: Core Craft, Strategy & Metrics Deep-Dive' : 'Round 2: Architecture & Core Stack Deep-Dive' },
     { topic: 'Live Coding', agentId: '04-live-coding-anti-freeze-trainer.md', title: isNonCode ? 'Round 3: Live Scenario & Case Drill' : 'Round 3: Verbal Problem Solving & System Drill' },
     { topic: 'Behavioral', agentId: '02-behavioral-leadership-star.md', title: 'Round 4: Leadership, Ownership & Measurable Impact' },
     { topic: 'Negotiation', agentId: '06b-negotiation-eu-b2b-contracts.md', title: 'Round 5: Scope, Leveling & Offer Close' }
   ];
+  const defaultRoster = tier === 'executive' ? execRoster : tier === 'manager' ? managerRoster : icRoster;
   const validIds = new Set(AGENT_META.map((a) => a.id));
-  const input = Array.isArray(rawRounds) && rawRounds.length >= 3 ? rawRounds.slice(0, 6) : defaultRoster;
+  const input = Array.isArray(rawRounds) && rawRounds.length >= 3 ? rawRounds.slice(0, 8) : defaultRoster;
 
   return input.map((r, idx) => {
     const fallback = defaultRoster[idx % defaultRoster.length];
@@ -493,7 +516,14 @@ export async function generateCustomInterviewPack(
   });
 
   const activeCv = await getActiveCv();
-  const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv);
+  const jdArchKey = detectRoleArchetype(`${roleTitle}\n${cleanJd}`, { headline: roleTitle });
+  const leadershipTier = getLeadershipTier(jdArchKey);
+  const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv, jdArchKey);
+  const loopArchitectureNote = leadershipTier === 'executive'
+    ? 'LOOP ARCHITECTURE (C-SUITE / EXECUTIVE — generate 6 to 7 rounds): Exec Search Calibration -> Board Chair / CEO Thesis Chemistry -> C-Suite Peer Cross-Examination -> First 100-Day Plan & Board Memo Defense -> Multi-Year Org/Unit-Econ Operating Model -> Turnarounds & 360 Backchannel Audit -> Equity Waterfall & Mandate Close.'
+    : leadershipTier === 'manager'
+      ? 'LOOP ARCHITECTURE (MANAGEMENT / LEADERSHIP — generate 5 to 6 rounds): Leadership Screen -> VP/Director Alignment -> Live People Coaching & Retention Roleplay -> Cross-Functional Peer Conflict Panel -> Delivery/Hiring/Org Scaling -> M3/M4 Leveling & Headcount Offer.'
+      : 'LOOP ARCHITECTURE (IC / SPECIALIST — generate 4 to 5 rounds): Recruiter/Mandate Screen -> Core Craft Deep-Dive -> Live Case/Problem Drill -> Behavioral STAR -> Scope & Offer Close.';
   const candidateName = activeCv?.profile?.candidateName || 'the candidate';
   const agentDirectory = adaptedAgents.map((a) => `${a.id} (${a.topic}: ${a.title})`).join('\n');
   const fullProfile = await fs.readFile(path.join(ROOT_DIR, '00-candidate-profile-and-core-rules.md'), 'utf8').catch(() => COMPACT_CANDIDATE_PROFILE);
@@ -501,8 +531,9 @@ export async function generateCustomInterviewPack(
     ? `${activeCv.profile.profilePrompt}\n\nFULL ACTIVE CV (${activeCv.filename}):\n${summarizeMdPrompt(activeCv.rawText, 2800)}`
     : summarizeMdPrompt(fullProfile, 3400);
 
-  const prompt = `You are an Executive & Principal Career Strategist preparing ${candidateName} for a target tech-company role (engineering, product, design, data, leadership, or C-suite).
+  const prompt = `You are an Executive & Principal Career Strategist preparing ${candidateName} for a target tech-company role (engineering, product, design, data, management, or C-suite).
 Analyze the Job Description against ${candidateName}'s verified profile and generate a COMPLETE, tailored Interview Series + Study Pack in English ONLY.
+${loopArchitectureNote}
 
 CANDIDATE VERIFIED PROFILE:
 ${candidateContext}
@@ -541,14 +572,14 @@ Return ONE strict JSON object with EXACTLY this structure:
     {
       "topic": "HR" | "Technical" | "Live Coding" | "Behavioral" | "System Design" | "Negotiation",
       "agentId": "Exact filename from AVAILABLE INTERVIEWER AGENTS",
-      "title": "Short round title (e.g. Recruiter Screen — Fintech Fit)",
+      "title": "Short round title (e.g. Board Chair Thesis / People Roleplay / Technical Deep-Dive)",
       "focus": "2-sentence interviewer objective tailored to this JD",
       "openerQuestion": "Natural first spoken interview question referencing this company/role",
       "tailoredPrompt": "Concrete follow-up topics & edge cases the live interviewer should probe"
     }
   ]
 }
-Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solving, Leadership/Behavioral, and Offer Negotiation.`;
+Match the round count & style requested in LOOP ARCHITECTURE above.`;
 
   const res = await fetchOllamaChat(
     {
@@ -556,7 +587,7 @@ Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solvin
       keep_alive: '5m',
       stream: true,
       format: 'json',
-      options: { temperature: 0.35, num_predict: 3800 },
+      options: { temperature: 0.35, num_ctx: 12288, num_predict: 4600 },
       messages: [{ role: 'user', content: prompt }]
     },
     240000,
@@ -637,7 +668,7 @@ Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solvin
       mustKnowQuestions: Array.isArray(parsed.studyPack?.mustKnowQuestions) ? parsed.studyPack.mustKnowQuestions : [],
       questionsToAskThem: Array.isArray(parsed.studyPack?.questionsToAskThem) ? parsed.studyPack.questionsToAskThem : []
     },
-    rounds: normalizeGeneratedRounds(parsed.rounds, finalCompany, finalRole)
+    rounds: normalizeGeneratedRounds(parsed.rounds, finalCompany, finalRole, leadershipTier)
   };
 
   upsertCustomInterviewSync(pack);

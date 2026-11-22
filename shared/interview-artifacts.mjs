@@ -3,7 +3,7 @@
  * Adapts shared briefs across IC Engineering, Lead/EM, Product/Design, Data/Security, and Executive C-Suite.
  */
 
-import { getRoleCategory } from './role-archetypes.mjs';
+import { getRoleCategory, getLeadershipTier } from './role-archetypes.mjs';
 
 export const SCREEN_SHARE_TOPICS = new Set(['Technical', 'Live Coding', 'System Design']);
 
@@ -568,16 +568,69 @@ export const INTERVIEW_ARTIFACTS = [
       'Bottlenecks: Avg HM CV review = 6.5 days; 4 interviewers ask overlapping uncalibrated questions.',
       'HRBP Alert: Regrettable attrition hit 32% inside one high-output Eng Manager’s org.'
     ]
+  },
+  {
+    id: 'exec-100day-plan',
+    roles: ['ceo', 'coo', 'cto', 'cfo', 'cro'],
+    categories: ['executive', 'gtm'],
+    topics: ['Live Coding', 'System Design', 'Technical'],
+    kind: '100-Day Plan & Board Memo',
+    title: 'First 100-Day Plan Critique (Series B Efficiency & Executive Reset)',
+    language: 'text',
+    promptHint: 'Audit Days 1-30 diagnostics, 31-60 bench/ICP calls, and spot hidden growth-before-retention traps.',
+    lines: [
+      'Draft 100-Day Plan Submitted to Board ($18M ARR, 84% GRR, Burn Multiple 2.1x):',
+      '  - Days 1-30: Audit pipeline coverage & top-20 enterprise accounts; launch 6-month platform rewrite.',
+      '  - Days 31-60: Hire 12 new quota AEs immediately to double Q3 bookings.',
+      '  - Days 61-100: Raise SMB tier pricing 25% across legacy cohorts; present 3-year roadmap to Board.'
+    ]
+  },
+  {
+    id: 'exec-peer-conflict',
+    roles: ['ceo', 'coo', 'cto', 'cfo', 'cro'],
+    categories: ['executive', 'gtm'],
+    topics: ['Behavioral', 'Technical', 'Live Coding'],
+    kind: 'C-Suite Peer Tension',
+    title: 'Boardroom Clash: €450k Custom Enterprise Deal vs. Margin & Roadmap',
+    language: 'text',
+    promptHint: 'Resolve CRO vs CTO vs CFO executive tension without creating bespoke consulting debt.',
+    lines: [
+      'Tension on Table (Week 11 of Q4):',
+      '  - CRO: "Signing this €450k bank closes Q4 quota—just promise on-prem deployment & custom SSO in 6 weeks."',
+      '  - CTO: "That pulls 8 senior engineer-weeks off core multi-tenant stability and adds 2 years of fork maintenance."',
+      '  - CFO: "Burn Multiple is 2.1x; cash is welcome ONLY if gross margin stays above 76% and non-recurring costs cap cleanly."'
+    ]
+  },
+  {
+    id: 'em-pip-coaching',
+    roles: ['em', 'tpm', 'people'],
+    categories: ['lead', 'tpm', 'people'],
+    topics: ['Live Coding', 'Behavioral', 'Technical'],
+    kind: 'Live People Roleplay',
+    title: 'High-Tenure Senior Underperformance, Harsh PRs & Squad Exit Risk',
+    language: 'text',
+    promptHint: 'Run calm SBI coaching, protect junior/mid retention, and separate tribal-knowledge fear from standards.',
+    lines: [
+      'Situation: Principal-tenure senior missed 3 straight commitments and left condescending PR comments.',
+      'Impact: Two strong mid-level engineers quietly asked about transferring teams this morning.',
+      'Complication: This engineer holds unwritten tribal knowledge on legacy billing settlement webhooks.'
+    ]
   }
 ];
 
-export function isScreenShareAllowedTopic(topic = '') {
-  return SCREEN_SHARE_TOPICS.has(String(topic || '').trim());
+export function isScreenShareAllowedTopic(topic = '', archKey = 'general') {
+  const cleanTopic = String(topic || '').trim();
+  if (SCREEN_SHARE_TOPICS.has(cleanTopic)) return true;
+  if (cleanTopic === 'Behavioral') {
+    const tier = getLeadershipTier(archKey);
+    return tier === 'executive' || tier === 'manager';
+  }
+  return false;
 }
 
 export function getArtifactsForTopic(topic = 'Technical', archKey = 'general') {
   const t = String(topic || '').trim();
-  if (!isScreenShareAllowedTopic(t)) return [];
+  if (!isScreenShareAllowedTopic(t, archKey)) return [];
   const roleSpecific = INTERVIEW_ARTIFACTS.filter(
     (a) => a.topics.includes(t) && Array.isArray(a.roles) && a.roles.includes(archKey)
   );

@@ -21,7 +21,8 @@ import { extractCoachMeta } from '../server/chat-service.mjs';
 import { createAvatarMotionState, reportUserMicLevel, inferEarlyExpression } from '../app/modules/avatar-motion.js';
 import { computeCallSpeechMetrics } from '../shared/speech-metrics.mjs';
 import { isScreenShareAllowedTopic, getArtifactsForTopic, findArtifactById } from '../shared/interview-artifacts.mjs';
-import { getTopicUiLabels, getRoleCategory, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+import { getTopicUiLabels, getRoleCategory, getLeadershipTier, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+import { normalizeGeneratedRounds } from '../server/document-service.mjs';
 import {
   ROLE_KNOWLEDGE_BASES,
   getRoleKnowledgeBase,
@@ -34,7 +35,7 @@ import {
   formatTechStacksForInterviewer
 } from '../shared/kb-tech-stacks.mjs';
 import { buildTurnContextAddendum } from '../server/pacing.mjs';
-import { getAdaptedAgents, getActiveJobDescriptions, resolveEffectiveArchetype, buildDynamicAgentDirective, detectRoleArchetype } from '../role-adapter.mjs';
+import { getAdaptedAgents, getActiveJobDescriptions, resolveEffectiveArchetype, buildDynamicAgentDirective, detectRoleArchetype, adaptMorningPathForTrack } from '../role-adapter.mjs';
 import {
   PERSONALITY_DIMENSIONS,
   FIXED_TUTOR_PERSONALITY,
@@ -56,7 +57,7 @@ import {
   LLM_CONTEXT_TIERS
 } from '../shared/model-tiers.mjs';
 import { rollDetailedDna, getExpressionTargets } from '../app/modules/avatar-detailed.js';
-import { AGENT_META } from '../server/config.mjs';
+import { AGENT_META, MORNING_PATH } from '../server/config.mjs';
 
 test('shared transcript normalizer cleans ASR tech terms cleanly', () => {
   assert.equal(normalizeInterviewTranscript('We built micro front end with rx js and ng rx'), 'We built micro-frontend with RxJS and NgRx');
@@ -581,4 +582,73 @@ test('computeUnspokenTail prevents double-speaking when streamed text and final 
     computeUnspokenTail('That makes complete sense. What was your biggest trade-off there?', 'That makes total sense. What was'),
     'your biggest trade-off there?'
   );
+});
+
+test('executive and manager interview architecture: custom loops, time-scaled pacing, visuals & behavioral Screen Share', () => {
+  assert.equal(getLeadershipTier('ceo'), 'executive');
+  assert.equal(getLeadershipTier('cfo'), 'executive');
+  assert.equal(getLeadershipTier('cto'), 'executive');
+  assert.equal(getLeadershipTier('coo'), 'executive');
+  assert.equal(getLeadershipTier('cro'), 'executive');
+  assert.equal(getLeadershipTier('em'), 'manager');
+  assert.equal(getLeadershipTier('tpm'), 'manager');
+  assert.equal(getLeadershipTier('people'), 'manager');
+  assert.equal(getLeadershipTier('frontend'), 'ic');
+  assert.equal(getLeadershipTier('pm'), 'ic');
+
+  // Distinct 20-day blueprints per tier
+  const ceoPath = adaptMorningPathForTrack(MORNING_PATH, null, AGENT_META, 'ceo');
+  const emPath = adaptMorningPathForTrack(MORNING_PATH, null, AGENT_META, 'em');
+  assert.equal(ceoPath.length, 20);
+  assert.equal(emPath.length, 20);
+  assert.ok(ceoPath.some((d) => /100-Day Plan/i.test(d.title)));
+  assert.equal(ceoPath.filter((d) => d.topic === 'System Design').length, 3);
+  assert.equal(emPath.filter((d) => d.topic === 'Behavioral').length, 4);
+  assert.equal(emPath.filter((d) => d.topic === 'Live Coding').length, 4);
+
+  // Target Interviews: 7-round Executive / 6-round Manager fallback rosters
+  const execRounds = normalizeGeneratedRounds(null, 'Kestrel EU', 'Chief Financial Officer (CFO)');
+  assert.equal(execRounds.length, 7);
+  assert.ok(execRounds.some((r) => /100-Day Plan/i.test(r.title)));
+  assert.ok(execRounds.some((r) => /C-Suite Peer/i.test(r.title)));
+
+  const mgrRounds = normalizeGeneratedRounds(null, 'ScaleGrid', 'Engineering Manager');
+  assert.equal(mgrRounds.length, 6);
+  assert.ok(mgrRounds.some((r) => /Coaching & Retention Roleplay/i.test(r.title)));
+
+  const icRounds = normalizeGeneratedRounds(null, 'FinPay', 'Senior Java Engineer');
+  assert.equal(icRounds.length, 5);
+
+  // Time-scaled pacing: 25m/45m stays in explore at userTurns=8 instead of premature closing!
+  const midExec = buildInterviewPacingDirectives({
+    action: 'turn', topic: 'Technical', archKey: 'ceo',
+    userTurns: 8, elapsedSeconds: 420, targetDurationSeconds: 1500, firstName: 'Alex'
+  });
+  assert.equal(midExec.phase, 'explore');
+
+  // Executive Mutual Due Diligence triggers at ~28% remaining budget (400s left of 1500s)
+  const execDiligence = buildInterviewPacingDirectives({
+    action: 'turn', topic: 'Technical', archKey: 'ceo',
+    userTurns: 11, elapsedSeconds: 1100, targetDurationSeconds: 1500, firstName: 'Alex'
+  });
+  assert.equal(execDiligence.phase, 'reverse_qa');
+  assert.match(execDiligence.pacingBlock, /EXECUTIVE MUTUAL DUE DILIGENCE/i);
+
+  // Executive / Manager interviewer presentation removes developer studio headsets
+  const execAgents = getAdaptedAgents(AGENT_META, null, 'ceo');
+  assert.ok(execAgents.every((a) => a.persona === 'business' && a.headset === 'none' && a.glasses !== 'tech'));
+  assert.ok(execAgents.filter((a) => a.gender === 'male').every((a) => a.tie === true));
+
+  // Screen Share allows Behavioral ONLY for executive & manager (IC Behavioral stays false!)
+  assert.equal(isScreenShareAllowedTopic('Behavioral'), false);
+  assert.equal(isScreenShareAllowedTopic('Behavioral', 'frontend'), false);
+  assert.equal(isScreenShareAllowedTopic('Behavioral', 'ceo'), true);
+  assert.equal(isScreenShareAllowedTopic('Behavioral', 'em'), true);
+
+  const ceoBehArts = getArtifactsForTopic('Behavioral', 'ceo').map((a) => a.id);
+  assert.ok(ceoBehArts.includes('exec-peer-conflict'));
+  const ceoCaseArts = getArtifactsForTopic('Live Coding', 'ceo').map((a) => a.id);
+  assert.ok(ceoCaseArts.includes('exec-100day-plan'));
+  const emCaseArts = getArtifactsForTopic('Live Coding', 'em').map((a) => a.id);
+  assert.ok(emCaseArts.includes('em-pip-coaching'));
 });

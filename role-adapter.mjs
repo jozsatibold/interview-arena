@@ -2,7 +2,14 @@
 // Daily Path drills, and live call directives to ANY tech company role
 // (CEO, COO, CTO, EM, Tech Lead, PM, PO, Design, Data/ML, Security, QA, Java, .NET, PHP, Python, DevOps, Frontend).
 
-import { ROLE_ARCHETYPES, detectRoleArchetype, getRoleCategory } from './shared/role-archetypes.mjs';
+import {
+  ROLE_ARCHETYPES,
+  detectRoleArchetype,
+  getRoleCategory,
+  getLeadershipTier,
+  EXECUTIVE_PATH_BLUEPRINT,
+  MANAGER_PATH_BLUEPRINT
+} from './shared/role-archetypes.mjs';
 import { formatKnowledgeForInterviewer } from './shared/role-knowledge.mjs';
 import { formatTechStacksForInterviewer } from './shared/kb-tech-stacks.mjs';
 
@@ -51,16 +58,31 @@ export function getAdaptedAgents(baseAgents, activeCv, targetRoleTrack = 'auto')
   if (!hasExplicitOverride && (!activeCv || activeCv.id === 'cv-baseline-1')) return baseAgents;
 
   const effArch = resolveEffectiveArchetype(activeCv, track);
+  const tier = getLeadershipTier(effArch);
   const overrides =
     !hasExplicitOverride && activeCv?.agentOverrides && Object.keys(activeCv.agentOverrides).length
       ? activeCv.agentOverrides
       : normalizeAgentOverrides(null, effArch, activeCv?.profile || {}, activeCv?.rawText || '');
 
   return baseAgents.map((ag) => {
-    const ov = overrides[ag.id];
-    if (!ov) return ag;
+    const ov = overrides[ag.id] || {};
+    const execVisuals = tier === 'executive'
+      ? {
+          persona: 'business',
+          headset: 'none',
+          glasses: ag.glasses === 'tech' ? 'executive' : ag.glasses,
+          tie: ag.gender === 'male'
+        }
+      : tier === 'manager'
+        ? {
+            persona: 'business',
+            headset: 'none',
+            glasses: ag.glasses === 'tech' ? 'round' : ag.glasses
+          }
+        : {};
     return {
       ...ag,
+      ...execVisuals,
       title: ov.title || ag.title,
       badgeText: ov.badgeText || ag.badgeText,
       focusHint: ov.focusHint || ''
@@ -198,26 +220,32 @@ export function normalizeCvDailyPath(rawDays, baseMorningPath, baseAgents, archK
   const input = Array.isArray(rawDays) ? rawDays : [];
   const archLabel = (ROLE_ARCHETYPES[archKey] || ROLE_ARCHETYPES.general).label;
   const cat = getRoleCategory(archKey);
+  const tier = getLeadershipTier(archKey);
+  const tierTemplate = tier === 'executive'
+    ? EXECUTIVE_PATH_BLUEPRINT
+    : tier === 'manager'
+      ? MANAGER_PATH_BLUEPRINT
+      : baseMorningPath;
   const stackSample = cat === 'engineering' || cat === 'data' || cat === 'security'
     ? ((profile?.coreStack || []).slice(0, 3).join(', ') || archLabel)
     : archLabel;
 
-  return baseMorningPath.map((fallback, idx) => {
+  return tierTemplate.map((fallback, idx) => {
     const item = input[idx] || {};
     const byTopic = baseAgents.find((a) => a.topic.toLowerCase() === String(item.topic || '').toLowerCase());
     const agent = validAgents.has(item.agent) ? item.agent : (byTopic?.id || fallback.agent);
     const meta = baseAgents.find((a) => a.id === agent);
     const slotTitle = slots[agent]?.title || fallback.title;
     const rawTitle = String(item.title || '').trim();
-    const safeTitle = rawTitle || slotTitle;
+    const safeTitle = (rawTitle || (tier === 'ic' ? slotTitle : fallback.title)).slice(0, 48);
     const jdObj = jds[idx % jds.length];
     return {
       day: idx + 1,
-      title: safeTitle.slice(0, 48),
+      title: safeTitle,
       topic: meta?.topic || item.topic || fallback.topic,
       agent,
       jd: jdObj.id,
-      focus: String(item.focus || `Drill ${slotTitle} focused on ${stackSample} scenarios & metrics.`).trim()
+      focus: String(item.focus || fallback.focus || `Drill ${slotTitle} focused on ${stackSample} scenarios & metrics.`).trim()
     };
   });
 }
@@ -226,7 +254,11 @@ export function adaptMorningPathForTrack(baseMorningPath, activeCv, baseAgents, 
   const track = String(targetRoleTrack || 'auto').trim();
   const hasExplicitOverride = Boolean(track && track !== 'auto' && Object.hasOwn(ROLE_ARCHETYPES, track));
   if (!hasExplicitOverride) {
-    return activeCv?.dailyPath?.length ? activeCv.dailyPath : baseMorningPath;
+    if (activeCv?.dailyPath?.length) return activeCv.dailyPath;
+    const detectedArch = resolveEffectiveArchetype(activeCv, 'auto');
+    return getLeadershipTier(detectedArch) === 'ic'
+      ? baseMorningPath
+      : normalizeCvDailyPath(null, baseMorningPath, baseAgents, detectedArch, activeCv?.profile || {});
   }
   return normalizeCvDailyPath(null, baseMorningPath, baseAgents, track, activeCv?.profile || {});
 }
@@ -328,17 +360,23 @@ export function buildDynamicAgentDirective({ meta, activeCv, companyName = '', a
     topic,
     tier: effTier
   });
+  const leadershipTier = getLeadershipTier(archKey);
+  const tierPosture = leadershipTier === 'executive'
+    ? 'Posture: Peer C-suite mutual due diligence — challenge platitudes calmly with boardroom metrics, never condescend.'
+    : (leadershipTier === 'manager' && topic === 'Live Coding')
+      ? 'Roleplay: Play the defensive report or pushy stakeholder briefly in character to test empathy + firmness before debriefing rationale.'
+      : '';
 
   if (effTier === 'small') {
     return `ROLE: ${meta?.avatarName || 'Interviewer'}${companyName ? ` @ ${companyName}` : ''} | ${arch.label} (${topic}) | Candidate: ${firstName} (${stackList})
 OBJECTIVE: ${activeMap[topic] || activeMap.Technical}
-${kbBlock}${stackBlock ? `\n${stackBlock}` : ''}`;
+${tierPosture ? `${tierPosture}\n` : ''}${kbBlock}${stackBlock ? `\n${stackBlock}` : ''}`;
   }
 
   return `# Interviewer Directive (${arch.label}): ${meta?.title || topic}
 - Persona: ${meta?.avatarName || 'Interviewer'}${companyName ? ` from ${companyName}` : ''} (${topic}) | Candidate: ${firstName} (${stackList})
 - Focus: ${activeMap[topic] || activeMap.Technical}
-${achievements ? `- Highlights:\n${achievements}\n` : ''}${gaps ? `- Probe Gaps:\n${gaps}\n` : ''}- Domain Rule: Stay strictly within ${arch.label} craft and ${topic} scope.
+${tierPosture ? `- ${tierPosture}\n` : ''}${achievements ? `- Highlights:\n${achievements}\n` : ''}${gaps ? `- Probe Gaps:\n${gaps}\n` : ''}- Domain Rule: Stay strictly within ${arch.label} craft and ${topic} scope.
 
 ${kbBlock}${stackBlock ? `\n\n${stackBlock}` : ''}`;
 }

@@ -1,6 +1,6 @@
 import { apiJson, esc, fillSelectOptions, saveUserState, consumeNdjsonStream } from '../components.js';
 import { resolveEffectiveContextTier, LLM_CONTEXT_TIERS } from '/shared/model-tiers.mjs';
-import { ROLE_TRACK_GROUPS, getTopicUiLabels } from '/shared/role-archetypes.mjs';
+import { ROLE_TRACK_GROUPS, getTopicUiLabels, getLeadershipTier } from '/shared/role-archetypes.mjs';
 import { $, $$, state, getCandidateIdentity, syncLinkedSelectGroup } from './state.js';
 import { updateAvatarStage, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, speakEnglish } from './voice-media.js';
@@ -71,7 +71,22 @@ export function renderHome() {
 
   renderRoleTrackSelector();
   const effArchKey = cat.effectiveArchKey || 'general';
+  const leadershipTier = getLeadershipTier(effArchKey);
   const topicLabels = getTopicUiLabels(effArchKey);
+  if ($('#heading-20day')) {
+    $('#heading-20day').textContent = leadershipTier === 'executive'
+      ? '🏛️ 20-Day Executive & Board Path'
+      : leadershipTier === 'manager'
+        ? '👥 20-Day Management & Leadership Path'
+        : '20-Morning Interview Path';
+  }
+  if ($('#heading-agents')) {
+    $('#heading-agents').textContent = leadershipTier === 'executive'
+      ? 'Executive & Board Panel (15)'
+      : leadershipTier === 'manager'
+        ? 'Leadership & Peer Panel (15)'
+        : 'All Interviewer Variations (15)';
+  }
 
   for (const chip of $$('#view-path .chip')) {
     const t = chip.dataset.topic;

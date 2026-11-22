@@ -14,7 +14,8 @@ export function isScreenShareOpen() {
 
 export function setScreenShareOpen(open) {
   const topic = state.activeSession?.topic || '';
-  const allowed = state.activeSession?.mode === 'interview' && isScreenShareAllowedTopic(topic);
+  const archKey = state.catalog?.effectiveArchKey || 'general';
+  const allowed = state.activeSession?.mode === 'interview' && isScreenShareAllowedTopic(topic, archKey);
   state.screenShareOpen = Boolean(open && allowed);
 
   const panel = $('#call-screenshare-panel');
@@ -29,7 +30,8 @@ export function setScreenShareOpen(open) {
 }
 
 export function renderScreenShareForTopic(topic) {
-  const allowed = state.activeSession?.mode === 'interview' && isScreenShareAllowedTopic(topic);
+  const archKey = state.catalog?.effectiveArchKey || 'general';
+  const allowed = state.activeSession?.mode === 'interview' && isScreenShareAllowedTopic(topic, archKey);
   const btn = $('#btn-toggle-screenshare');
   if (btn) btn.hidden = !allowed;
   if (!allowed) {
@@ -37,7 +39,6 @@ export function renderScreenShareForTopic(topic) {
     return;
   }
 
-  const archKey = state.catalog?.effectiveArchKey || 'general';
   const cat = getRoleCategory(archKey);
   const notesEl = $('#screenshare-notes');
   if (notesEl) {

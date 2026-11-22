@@ -4,7 +4,7 @@
  * by structuring interviews into Warm-Up -> Broad Intro -> Bridged Exploration -> Smooth Wrap-Up.
  */
 
-import { getRoleCategory, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+import { getRoleCategory, getLeadershipTier, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
 
 /**
  * Remove legacy "How to Start Immediately" sections from static agent markdown prompts
@@ -259,6 +259,7 @@ export function getTopicScopeContract(topic = 'HR', archKey = 'general') {
 export function buildInterviewPacingDirectives({
   action = 'turn',
   topic = 'HR',
+  archKey = 'general',
   userTurns = 0,
   elapsedSeconds = null,
   targetDurationSeconds = null,
@@ -270,15 +271,25 @@ export function buildInterviewPacingDirectives({
   compactMode = false
 }) {
   const isStart = action === 'start' || userTurns === 0;
-  const hasClock = Number.isFinite(Number(targetDurationSeconds)) && Number(targetDurationSeconds) > 0 && Number.isFinite(Number(elapsedSeconds));
-  const remainingSec = hasClock ? Math.max(0, Number(targetDurationSeconds) - Number(elapsedSeconds)) : null;
+  const durSec = Number(targetDurationSeconds);
+  const hasClock = Number.isFinite(durSec) && durSec > 0 && Number.isFinite(Number(elapsedSeconds));
+  const remainingSec = hasClock ? Math.max(0, durSec - Number(elapsedSeconds)) : null;
+  const leadershipTier = getLeadershipTier(archKey);
+  const effectiveDuration = Number.isFinite(durSec) && durSec > 0 ? durSec : 720;
+  const closingSec = Math.min(leadershipTier === 'executive' ? 90 : 50, Math.round(effectiveDuration * 0.12));
+  const reverseQaSec = leadershipTier === 'executive'
+    ? Math.round(effectiveDuration * 0.28)
+    : leadershipTier === 'manager'
+      ? Math.round(effectiveDuration * 0.22)
+      : Math.min(180, Math.round(effectiveDuration * 0.20));
+  const maxTurnsCap = Math.max(8, Math.round((effectiveDuration / 60) * 0.65));
 
   let phase = 'explore';
   if (isStart) phase = 'warmup';
   else if (userTurns === 1) phase = 'intro';
-  else if ((remainingSec !== null && remainingSec <= 45) || userTurns >= 8) phase = 'closing';
-  else if ((remainingSec !== null && remainingSec <= 150) || userTurns === 7) phase = 'reverse_qa';
-  else if (userTurns <= 6) phase = 'explore';
+  else if ((remainingSec !== null && remainingSec <= closingSec) || userTurns >= maxTurnsCap) phase = 'closing';
+  else if ((remainingSec !== null && remainingSec <= reverseQaSec) || userTurns === maxTurnsCap - 1) phase = 'reverse_qa';
+  else phase = 'explore';
 
   const moodDesc = personality?.mood ? ` (${personality.mood})` : '';
   const hintClean = String(openerHint || '').trim();
@@ -346,11 +357,21 @@ CRITICAL: Do NOT ask a CV-specific, technical, overlapping-dates, or compensatio
       topic === 'HR'
         ? 'Answer ONLY HR/culture/team-process questions (if they ask deep technical trivia, note an engineer can cover it in the next round).'
         : `Keep your answers strictly within your ${topic} authority.`;
+    const reverseDirective = leadershipTier === 'executive'
+      ? `STAGE 3A (Executive Mutual Due Diligence): React briefly, open the floor as a Board/C-suite peer for ${firstName}'s sharp diligence questions on runway, Board alignment, churn/margin tension, or mandate autonomy, and answer candidly.`
+      : leadershipTier === 'manager'
+        ? `STAGE 3A (Leadership Due Diligence): React briefly and invite ${firstName} to probe team health, headcount budgets, PM-Eng trade-offs, or leadership autonomy directly.`
+        : `STAGE 3A (Reverse Q&A): React briefly to their answer, mention we have a couple minutes left, and invite ${firstName} to ask YOU questions about the role/team (within ${topic} scope).`;
     const pacingBlock = compactMode
-      ? `STAGE 3A (Reverse Q&A — ~2 min left): React briefly to their answer, mention we have ~2 minutes left, and invite ${firstName} to ask YOU questions about the role/team (or answer their question cleanly within ${topic} scope).`
-      : `CONVERSATION PHASE 3A — REVERSE Q&A ("WHAT QUESTIONS DO YOU HAVE FOR ME?"):
+      ? reverseDirective
+      : leadershipTier === 'executive'
+        ? `CONVERSATION PHASE 3A — EXECUTIVE MUTUAL DUE DILIGENCE:
+- React concisely to ${firstName}'s previous strategic point.
+- Shift smoothly into peer-level mutual due diligence ("I want to leave plenty of room for your board & company diligence—what would you need clarity on before stepping into this mandate?").
+- Answer ${firstName}'s questions candidly as an Executive / Board partner (runway, peer tension, NRR vs churn truth, decision autonomy) without sugarcoating.`
+        : `CONVERSATION PHASE 3A — REVERSE Q&A ("WHAT QUESTIONS DO YOU HAVE FOR ME?"):
 - React naturally and concisely to ${firstName}'s previous answer.
-- If you haven't invited their questions yet, notice the time naturally ("We have about two minutes left before we wrap up—what questions do you have for me about the team or role?").
+- If you haven't invited their questions yet, notice the time naturally ("We have a couple of minutes left before we wrap up—what questions do you have for me about the team or role?").
 - If ${firstName} just asked YOU a question, give a grounded, candid, realistic answer inside your role (${scopeReminder}) and check if they have one final quick question.`;
     return { phase, pacingBlock, startPrompt: '' };
   }

@@ -15,6 +15,7 @@ import {
   LOGIC_PACING_RULE
 } from './pacing.mjs';
 import { findArtifactById, isScreenShareAllowedTopic } from '../shared/interview-artifacts.mjs';
+import { getLeadershipTier } from '../shared/role-archetypes.mjs';
 import { resolveEffectiveContextTier } from '../shared/model-tiers.mjs';
 import { formatKnowledgeForInterviewer, formatKnowledgeForDebrief } from '../shared/role-knowledge.mjs';
 import { formatTechStacksForInterviewer } from '../shared/kb-tech-stacks.mjs';
@@ -556,6 +557,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     const pacing = buildInterviewPacingDirectives({
       action,
       topic,
+      archKey: effectiveArchKey,
       userTurns: fullUserTurnCount,
       elapsedSeconds,
       targetDurationSeconds,
@@ -566,7 +568,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       openerHint,
       compactMode: tierInfo.budgets.compactPrompt
     });
-    const screenShareArtifact = isScreenShareAllowedTopic(topic) && screenShareId ? findArtifactById(screenShareId) : null;
+    const screenShareArtifact = isScreenShareAllowedTopic(topic, effectiveArchKey) && screenShareId ? findArtifactById(screenShareId) : null;
     const addendum = buildTurnContextAddendum({
       interrupted: Boolean(interrupted),
       screenShareArtifact,
@@ -758,6 +760,12 @@ export async function handleChat(body) {
     throw err;
   }
   const ctx = await resolveChatContext(body, { isFinish: true });
+  const finishTier = getLeadershipTier(ctx.interviewFinishMeta?.effectiveArchKey || 'general');
+  const qNoteHint = finishTier === 'executive'
+    ? '1 concise sentence evaluating Executive Reverse Due Diligence (Board alignment, runway/burn, NRR/churn truth, mandate autonomy)'
+    : finishTier === 'manager'
+      ? '1 concise sentence evaluating Leadership Due Diligence (team health, headcount, PM-Eng trade-offs, autonomy)'
+      : '1 concise sentence evaluating whether the candidate asked insightful closing questions';
   const buildFinishContract = (verdictEnum) => `
 === STRICT OUTPUT FORMAT (RETURN ONLY VALID JSON, NO MARKDOWN FENCES) ===
 CRITICAL LANGUAGE RULE: ALL JSON fields MUST be in English ONLY.
@@ -773,7 +781,7 @@ CRITICAL LANGUAGE RULE: ALL JSON fields MUST be in English ONLY.
     "strengthsHu": ["Concrete strength 1 in English", "Concrete strength 2 in English"],
     "weaknessesHu": ["Concrete improvement 1 in English", "Concrete improvement 2 in English"],
     "goldenSentences": ["Senior English golden sentence 1", "Golden sentence 2", "Golden sentence 3"],
-    "candidateQuestionsNote": null OR "1 concise sentence evaluating whether the candidate asked insightful closing questions"
+    "candidateQuestionsNote": null OR "${qNoteHint}"
   }
 }`;
 

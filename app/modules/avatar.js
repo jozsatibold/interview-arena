@@ -172,7 +172,10 @@ export function rollAppearance(meta, personality, genderOverride = null) {
   const skinTone = pickOne(REALISTIC_SKIN_TONES);
   const eyeColor = pickOne(REALISTIC_EYE_COLORS);
   const hairStyle = pickOne(hairPool);
-  const glassesChoices = [meta?.glasses || 'none', meta?.glasses || 'none', 'none', 'round', 'executive', 'tech'];
+  const baseGlasses = meta?.persona === 'business' && meta?.glasses === 'tech' ? 'executive' : (meta?.glasses || 'none');
+  const glassesChoices = meta?.persona === 'business'
+    ? [baseGlasses, baseGlasses, 'none', 'executive', 'round']
+    : [baseGlasses, baseGlasses, 'none', 'round', 'executive', 'tech'];
   const glasses = pickOne(glassesChoices);
   const humorId = personality?.traits?.humor || '';
   const warmthId = personality?.traits?.warmth || '';
