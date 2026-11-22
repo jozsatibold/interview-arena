@@ -70,6 +70,8 @@ export function applyCvCatalogBundle(data) {
     if (data.morningPath) state.catalog.morningPath = data.morningPath;
     if (data.agents) state.catalog.agents = data.agents;
     if (data.jobDescriptions) state.catalog.jobDescriptions = data.jobDescriptions;
+    if (data.activeRoleTrack) state.catalog.activeRoleTrack = data.activeRoleTrack;
+    if (data.effectiveArchKey) state.catalog.effectiveArchKey = data.effectiveArchKey;
   }
   syncCandidateIdentity();
   renderAboutMe();

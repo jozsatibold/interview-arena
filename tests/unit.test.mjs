@@ -21,7 +21,20 @@ import { extractCoachMeta } from '../server/chat-service.mjs';
 import { createAvatarMotionState, reportUserMicLevel, inferEarlyExpression } from '../app/modules/avatar-motion.js';
 import { computeCallSpeechMetrics } from '../shared/speech-metrics.mjs';
 import { isScreenShareAllowedTopic, getArtifactsForTopic, findArtifactById } from '../shared/interview-artifacts.mjs';
+import { getTopicUiLabels, getRoleCategory, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+import {
+  ROLE_KNOWLEDGE_BASES,
+  getRoleKnowledgeBase,
+  formatKnowledgeForInterviewer,
+  formatKnowledgeForDebrief
+} from '../shared/role-knowledge.mjs';
+import {
+  TECH_STACK_KBS,
+  detectRelevantTechStacks,
+  formatTechStacksForInterviewer
+} from '../shared/kb-tech-stacks.mjs';
 import { buildTurnContextAddendum } from '../server/pacing.mjs';
+import { getAdaptedAgents, getActiveJobDescriptions, resolveEffectiveArchetype, buildDynamicAgentDirective, detectRoleArchetype } from '../role-adapter.mjs';
 import {
   PERSONALITY_DIMENSIONS,
   FIXED_TUTOR_PERSONALITY,
@@ -39,10 +52,10 @@ import {
 } from '../server/pacing.mjs';
 import {
   detectModelParamBillions,
-  resolveEffectiveContextTier
+  resolveEffectiveContextTier,
+  LLM_CONTEXT_TIERS
 } from '../shared/model-tiers.mjs';
 import { rollDetailedDna, getExpressionTargets } from '../app/modules/avatar-detailed.js';
-import { detectRoleArchetype, getAdaptedAgents } from '../role-adapter.mjs';
 import { AGENT_META } from '../server/config.mjs';
 
 test('shared transcript normalizer cleans ASR tech terms cleanly', () => {
@@ -377,4 +390,162 @@ test('interview screen-share artifacts are restricted to tech topics and build c
   assert.match(addendum, /BARGE-IN/);
   assert.match(addendum, /Candidate highlighted line\(s\): 6, 7/);
   assert.match(addendum, /Missing AbortController/);
+});
+
+test('universal tech-company archetypes detect PM, PO, CTO, CEO, COO, Tech Lead and adapt prompts/artifacts cleanly', () => {
+  assert.equal(detectRoleArchetype('Senior Product Manager working with React & SQL engineers on activation funnel and PRD', { headline: 'Senior Product Manager' }), 'pm');
+  assert.equal(detectRoleArchetype('Product Owner facilitating Scrum backlog refinement and acceptance criteria in Jira', { headline: 'Product Owner' }), 'po');
+  assert.equal(detectRoleArchetype('Chief Technology Officer scaling 90 engineers, cloud FinOps, and SOC2 roadmap', { headline: 'CTO / VP Engineering' }), 'cto');
+  assert.equal(detectRoleArchetype('CEO & Co-Founder leading Series B fundraising, P&L, NRR, and board governance', { headline: 'Chief Executive Officer' }), 'ceo');
+  assert.equal(detectRoleArchetype('Chief Operating Officer driving SLA recovery, unit economics, and RevOps scaling', { headline: 'COO' }), 'coo');
+  assert.equal(detectRoleArchetype('Staff Tech Lead authoring RFCs, mentoring squads on React & TypeScript architecture', { headline: 'Staff Tech Lead' }), 'techlead');
+  assert.equal(detectRoleArchetype('Engineering Manager leading 1-on-1s, hiring loops, and delivery predictability', { headline: 'Engineering Manager' }), 'em');
+  assert.equal(detectRoleArchetype('Senior Product Designer owning Figma design system and WCAG usability testing', { headline: 'Senior Product Designer' }), 'design');
+
+  assert.equal(getRoleCategory('ceo'), 'executive');
+  assert.equal(getRoleCategory('pm'), 'product');
+  assert.ok(Object.keys(ROLE_ARCHETYPES).length >= 18);
+
+  const pmLabels = getTopicUiLabels('pm');
+  assert.equal(pmLabels['Live Coding'], 'Live Case');
+  const ceoLabels = getTopicUiLabels('ceo');
+  assert.equal(ceoLabels['Live Coding'], 'Exec Scenario');
+
+  const pmScope = getTopicScopeContract('Live Coding', 'pm');
+  assert.match(pmScope.forbidden, /NEVER ask the candidate to write programming code/i);
+  const ctoScope = getTopicScopeContract('Live Coding', 'cto');
+  assert.match(ctoScope.forbidden, /NEVER ask the candidate to write code/i);
+
+  const pmArtifacts = getArtifactsForTopic('Technical', 'pm');
+  assert.ok(pmArtifacts.some((a) => a.id === 'pm-activation-funnel'));
+  assert.ok(!pmArtifacts.some((a) => a.id === 'ts-checkout-race'));
+
+  const ceoArtifacts = getArtifactsForTopic('Technical', 'ceo');
+  assert.ok(ceoArtifacts.some((a) => a.id === 'ceo-board-runway'));
+
+  const effTrack = resolveEffectiveArchetype({ rawText: 'React', profile: { headline: 'Frontend' } }, 'coo');
+  assert.equal(effTrack, 'coo');
+  const adapted = getAdaptedAgents([{ id: '04-live-coding-anti-freeze-trainer.md', topic: 'Live Coding', title: 'Old', badgeText: '{}' }], null, 'coo');
+  assert.match(adapted[0].title, /Ops Case/i);
+  const jds = getActiveJobDescriptions([], null, 'cto');
+  assert.match(jds[0].roleTitle, /CTO|Chief Technology/i);
+
+  const dir = buildDynamicAgentDirective({ meta: { title: 'Strategy', topic: 'Technical', avatarName: 'Maya' }, activeCv: { profile: { candidateName: 'Jozsa' } }, companyName: 'TestCo', archKey: 'ceo' });
+  assert.match(dir, /CEO \/ Co-Founder/i);
+  assert.match(dir, /NEVER quiz coding syntax/i);
+});
+
+test('every tech-company archetype has a complete senior knowledge base, zero prompt truncation across all 3 LLM tiers & targeted artifacts', () => {
+  const keys = Object.keys(ROLE_ARCHETYPES);
+  assert.ok(keys.length >= 32, `Expected >=32 startup/enterprise archetypes, got ${keys.length}`);
+  const topics = ['HR', 'Behavioral', 'Technical', 'Live Coding', 'System Design', 'Negotiation'];
+
+  for (const key of keys) {
+    const kb = ROLE_KNOWLEDGE_BASES[key];
+    assert.ok(kb, `Missing KB for role ${key}`);
+    assert.ok(typeof kb.mandate === 'string' && kb.mandate.length > 40, `Weak mandate for ${key}`);
+    assert.ok(Array.isArray(kb.mentalModels) && kb.mentalModels.length >= 4, `Need >=4 mentalModels for ${key}`);
+    assert.ok(Array.isArray(kb.probeLadders) && kb.probeLadders.length >= 3, `Need >=3 probeLadders for ${key}`);
+    assert.ok(Array.isArray(kb.redFlags) && kb.redFlags.length >= 3, `Need >=3 redFlags for ${key}`);
+    assert.ok(Array.isArray(kb.powerPhrases) && kb.powerPhrases.length >= 2, `Need >=2 powerPhrases for ${key}`);
+    for (const t of topics) {
+      assert.ok(typeof kb.roundRubrics?.[t] === 'string' && kb.roundRubrics[t].length > 25, `Missing ${t} rubric for ${key}`);
+    }
+    // Verify ZERO prompt truncation on Small, Medium, and Large LLM budgets!
+    for (const tierId of ['small', 'medium', 'large']) {
+      const dir = buildDynamicAgentDirective({
+        meta: { title: 'Core Craft', topic: 'Technical', avatarName: 'Alex' },
+        activeCv: { profile: { candidateName: 'Test Candidate', topAchievements: ['Scaled system 4x', 'Cut costs 30%'], gapAreas: ['Metrics framing'] } },
+        companyName: 'TestCo',
+        archKey: key,
+        tier: tierId
+      });
+      const cap = LLM_CONTEXT_TIERS[tierId].budgets.maxAgentChars;
+      assert.ok(dir.length <= cap, `Prompt truncation risk for ${key} on ${tierId}: ${dir.length} > ${cap}`);
+    }
+  }
+
+  // Design tools & workflow depth
+  const designKb = getRoleKnowledgeBase('design');
+  const designBlob = `${designKb.mentalModels.join(' ')} ${designKb.roundRubrics.Technical}`;
+  assert.match(designBlob, /Figma/i);
+  assert.match(designBlob, /Dev Mode/i);
+  assert.match(designBlob, /Storybook/i);
+  assert.match(designBlob, /ProtoPie|Rive/i);
+  assert.match(designBlob, /Maze|Dovetail/i);
+
+  // Startup & Enterprise role detection
+  assert.equal(detectRoleArchetype('Chief Financial Officer leading ASC 606 audit, Rule of 40 FP&A, and Series C fundraising', { headline: 'CFO' }), 'cfo');
+  assert.equal(detectRoleArchetype('Chief Revenue Officer scaling Enterprise MEDDPICC pipeline coverage and $35M ARR', { headline: 'CRO / VP Sales' }), 'cro');
+  assert.equal(detectRoleArchetype('Director of Product Marketing driving ICP positioning, PLG launches, and CAC payback', { headline: 'PMM Director' }), 'marketing');
+  assert.equal(detectRoleArchetype('Principal Solutions Architect scoping Okta SCIM PoCs and EU bank integrations', { headline: 'Solutions Architect' }), 'solutions');
+  assert.equal(detectRoleArchetype('Senior Go Engineer building gRPC microservices, goroutine worker pools, and pprof optimization', { headline: 'Senior Go Engineer' }), 'go');
+  assert.equal(detectRoleArchetype('Senior Rust Systems Engineer writing Tokio async storage pipelines with zero-copy serde', { headline: 'Senior Rust Engineer' }), 'rust');
+  assert.equal(detectRoleArchetype('Senior iOS Engineer maintaining SwiftUI, structured concurrency, and legacy Objective-C SDK bridges', { headline: 'Senior iOS Engineer' }), 'ios');
+  assert.equal(detectRoleArchetype('Senior Android Engineer building Kotlin Coroutines, Jetpack Compose, Room and WorkManager', { headline: 'Senior Android Engineer' }), 'android');
+  assert.equal(detectRoleArchetype('Senior C++20 Systems Engineer optimizing RAII lock-free ring buffers and cache locality', { headline: 'Senior C++ Engineer' }), 'cpp');
+  assert.equal(detectRoleArchetype('Senior Mobile Engineer migrating Apache Cordova WKWebView plugins and React Native Hermes apps', { headline: 'Senior React Native / Mobile Engineer' }), 'mobile');
+  assert.equal(detectRoleArchetype('Staff Technical Program Manager managing critical path RAID risks and 6-squad Go/No-Go launches', { headline: 'Staff Technical Program Manager' }), 'tpm');
+  assert.equal(detectRoleArchetype('Enterprise Customer Success Manager driving 122% NRR, executive QBRs, and churn rescue', { headline: 'Enterprise CSM / TAM' }), 'csm');
+  assert.equal(detectRoleArchetype('Head of People Ops & Technical Recruiting scaling hiring rubrics, comp bands, and HRBP org design', { headline: 'Head of People Ops' }), 'people');
+
+  // Non-coding roles MUST NEVER receive IC coding stack pitfalls or coding scope contracts
+  for (const nonCodeRole of ['ceo', 'coo', 'cto', 'cfo', 'cro', 'em', 'pm', 'po', 'design', 'marketing', 'tpm', 'csm', 'people']) {
+    assert.equal(formatTechStacksForInterviewer({ archKey: nonCodeRole, cvText: 'React Java SQL', topic: 'Technical' }), '', `${nonCodeRole} leaked coding stack KB`);
+    const lcScope = getTopicScopeContract('Live Coding', nonCodeRole);
+    assert.match(lcScope.forbidden, /NEVER ask the candidate to write/i, `${nonCodeRole} missing no-code Live Coding guardrail`);
+  }
+
+  // Built-in 20 multi-language / mobile / web / data / cloud stack deep KBs
+  const all20Stacks = ['typescript', 'nodejs', 'react', 'vue', 'lit', 'angular', 'java', 'dotnet', 'python', 'go', 'rust', 'cpp', 'swift', 'objc', 'kotlin', 'reactnative', 'cordova', 'flutter', 'sql', 'cloud'];
+  for (const stackId of all20Stacks) {
+    assert.ok(TECH_STACK_KBS[stackId]?.pitfalls && TECH_STACK_KBS[stackId]?.probe, `Missing built-in tech KB for ${stackId}`);
+  }
+  const hybridMobileStacks = detectRelevantTechStacks({
+    archKey: 'mobile',
+    cvText: 'Migrated Cordova WKWebView plugins to React Native New Architecture with Swift native bridges',
+    coreStack: ['Cordova', 'React Native', 'Swift'],
+    maxCount: 3
+  });
+  const hybridIds = hybridMobileStacks.map((s) => s.id);
+  assert.ok(hybridIds.includes('cordova') && hybridIds.includes('reactnative') && hybridIds.includes('swift'));
+
+  const litReactPrompt = formatTechStacksForInterviewer({
+    archKey: 'frontend',
+    cvText: 'Built 12KB Lit Web Components Shadow DOM widgets and React Next.js SaaS',
+    topic: 'Technical',
+    tier: 'large'
+  });
+  assert.match(litReactPrompt, /Lit \/ Web Components/i);
+  assert.match(litReactPrompt, /React \/ Next\.js/i);
+
+  const debriefBar = formatKnowledgeForDebrief({ archKey: 'cro', topic: 'Live Coding' });
+  assert.match(debriefBar, /SENIOR ROLE GRADING RUBRIC \(CRO/i);
+  assert.match(debriefBar, /Automatic Penalty Red Flags/i);
+
+  // Exact first Screen Share artifact pinning across every specialized track
+  assert.equal(getArtifactsForTopic('Technical', 'ceo')[0]?.id, 'ceo-board-runway');
+  assert.equal(getArtifactsForTopic('Technical', 'coo')[0]?.id, 'coo-ops-sla');
+  assert.equal(getArtifactsForTopic('Technical', 'cto')[0]?.id, 'cto-finops-org');
+  assert.equal(getArtifactsForTopic('Technical', 'pm')[0]?.id, 'pm-activation-funnel');
+  assert.equal(getArtifactsForTopic('Technical', 'po')[0]?.id, 'po-sprint-scope');
+  assert.equal(getArtifactsForTopic('Technical', 'cfo')[0]?.id, 'cfo-rule40-cohort');
+  assert.equal(getArtifactsForTopic('Technical', 'cro')[0]?.id, 'cro-pipeline-meddpicc');
+  assert.equal(getArtifactsForTopic('Technical', 'marketing')[0]?.id, 'mktg-plg-positioning');
+  assert.equal(getArtifactsForTopic('Technical', 'solutions')[0]?.id, 'sol-enterprise-poc');
+  assert.equal(getArtifactsForTopic('Technical', 'devops')[0]?.id, 'devops-k8s-outage');
+  assert.equal(getArtifactsForTopic('Technical', 'qa')[0]?.id, 'qa-flaky-ci-pyramid');
+  assert.equal(getArtifactsForTopic('Technical', 'java')[0]?.id, 'backend-idempotency-outbox');
+  assert.equal(getArtifactsForTopic('Technical', 'flutter')[0]?.id, 'mobile-jank-offline');
+  assert.equal(getArtifactsForTopic('Technical', 'go')[0]?.id, 'go-context-leak');
+  assert.equal(getArtifactsForTopic('Technical', 'rust')[0]?.id, 'rust-tokio-mutex');
+  assert.equal(getArtifactsForTopic('Technical', 'ios')[0]?.id, 'ios-actor-reentrancy');
+  assert.equal(getArtifactsForTopic('Technical', 'android')[0]?.id, 'android-compose-anr');
+  assert.equal(getArtifactsForTopic('Technical', 'cpp')[0]?.id, 'cpp-raii-falsesharing');
+  assert.equal(getArtifactsForTopic('Technical', 'mobile')[0]?.id, 'rn-cordova-bridge');
+  assert.equal(getArtifactsForTopic('Technical', 'tpm')[0]?.id, 'tpm-cross-org-slip');
+  assert.equal(getArtifactsForTopic('Technical', 'csm')[0]?.id, 'csm-enterprise-churn');
+  assert.equal(getArtifactsForTopic('Technical', 'people')[0]?.id, 'people-hiring-leveling');
+
+  assert.ok(getRoleKnowledgeBase('unknown-fallback') === ROLE_KNOWLEDGE_BASES.general);
 });

@@ -519,6 +519,7 @@ export const DEFAULT_STATE = {
   micMode: 'manual',
   defaultLayout: 'spotlight',
   defaultDurationMinutes: 12,
+  targetRoleTrack: 'auto',
   powerUps: {
     antiFreezeShield: 3,
     seniorHint: 4,

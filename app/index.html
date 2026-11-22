@@ -340,6 +340,12 @@
         </div>
 
         <label class="jd-picker">
+          <span>Target Role:</span>
+          <select id="role-track-select" aria-label="Target Tech Company Role Track"></select>
+        </label>
+        <button type="button" id="btn-role-playbook" class="btn btn-secondary btn-compact" title="Inspect Senior Knowledge Base, Frameworks &amp; Interview Rubrics for this role">📚 Role Playbook</button>
+
+        <label class="jd-picker">
           <span>Target Fake Job:</span>
           <select id="global-jd-select"></select>
         </label>
@@ -371,6 +377,7 @@
           <p id="lobby-join-interviewer" class="muted">Check your camera &amp; mic, skim the role brief, and join when ready.</p>
         </div>
         <div class="lobby-header-actions">
+          <button type="button" id="btn-lobby-playbook" class="btn btn-secondary lobby-settings-icon-btn" title="Open Senior Role Knowledge Base &amp; Frameworks" aria-label="Open Senior Role Playbook">📚 Prep KB</button>
           <button type="button" id="btn-lobby-settings" class="btn btn-secondary lobby-settings-icon-btn" title="Interviewer, Personality &amp; Call Settings" aria-label="Open Interviewer and Call Settings">⚙️ Settings</button>
           <int-button control-id="btn-lobby-back" variant="ghost" label="← Back to Path"></int-button>
         </div>
@@ -1084,6 +1091,25 @@
       </form>
     </section>
   </main>
+
+  <!-- NATIVE MODAL DIALOG: SENIOR ROLE KNOWLEDGE BASE PLAYBOOK -->
+  <dialog id="role-playbook-dialog" class="playbook-dialog" closedby="any" aria-labelledby="role-playbook-title">
+    <div class="dialog-header">
+      <h2 id="role-playbook-title">📚 Senior Knowledge Base</h2>
+      <button type="button" class="icon-close" command="close" commandfor="role-playbook-dialog" aria-label="Close Senior Role Playbook">✕</button>
+    </div>
+    <div class="playbook-toolbar">
+      <label class="jd-picker" style="margin:0;">
+        <span>Inspect Role Track:</span>
+        <select id="playbook-role-select" aria-label="Inspect Role Knowledge Base"></select>
+      </label>
+      <span id="playbook-category-badge" class="badge badge-green">SENIOR KB</span>
+    </div>
+    <div id="role-playbook-body" class="dialog-body"></div>
+    <form method="dialog" class="dialog-footer">
+      <button type="submit" value="done" class="btn btn-primary">Ready to Practice</button>
+    </form>
+  </dialog>
 
   <!-- NATIVE MODAL DIALOG: LOBBY INTERVIEWER & SESSION SETTINGS -->
   <dialog id="lobby-settings-dialog" closedby="any" aria-labelledby="lobby-settings-title">

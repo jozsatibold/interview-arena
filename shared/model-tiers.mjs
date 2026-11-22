@@ -11,7 +11,7 @@ export const LLM_CONTEXT_TIERS = {
     rangeLabel: '1B–8B',
     summary: 'Compact context, tight 3-turn memory & lean instructions for fast, reliable 1B–8B inference.',
     budgets: {
-      maxAgentChars: 700,
+      maxAgentChars: 1450,
       maxJdChars: 550,
       maxProfileChars: 480,
       maxHistoryMsgs: 6,
@@ -28,7 +28,7 @@ export const LLM_CONTEXT_TIERS = {
     rangeLabel: '9B–35B',
     summary: 'Balanced CV/JD context, smooth multi-turn transitions & real-time coaching for 9B–35B models.',
     budgets: {
-      maxAgentChars: 1650,
+      maxAgentChars: 3400,
       maxJdChars: 1200,
       maxProfileChars: 950,
       maxHistoryMsgs: 12,
@@ -45,7 +45,7 @@ export const LLM_CONTEXT_TIERS = {
     rangeLabel: '36B+',
     summary: 'Deep full-CV & JD context, extended call history & nuanced trade-off follow-ups for 36B+ models.',
     budgets: {
-      maxAgentChars: 2600,
+      maxAgentChars: 4800,
       maxJdChars: 2000,
       maxProfileChars: 1600,
       maxHistoryMsgs: 24,

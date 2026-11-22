@@ -1,5 +1,6 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
+import { getTopicUiLabels } from '../../shared/role-archetypes.mjs';
 import { getActiveAgentMeta, inferVoiceGender, rollAppearance, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, stopAllSpeech, speakEnglish, ensureMediaStream, toggleCamera, toggleMicrophone, stopMicMeter, stopMediaStream } from './voice-media.js';
 
@@ -253,7 +254,8 @@ export async function openLobby(cfg, switchToView) {
   if ($('#lobby-duration-select')) {
     $('#lobby-duration-select').value = String(state.user?.defaultDurationMinutes || 12);
   }
-  $('#lobby-role-badge').textContent = `${meta.code} · ${meta.topic}`;
+  const topicLabels = getTopicUiLabels(state.catalog?.effectiveArchKey || 'general');
+  $('#lobby-role-badge').textContent = `${meta.code} · ${topicLabels[meta.topic] || meta.topic}`;
   if ($('#lobby-voice-badge')) $('#lobby-voice-badge').textContent = `Voice: ${presetVoice}`;
   $('#lobby-avatar-name').textContent = `${meta.avatarName} · ${meta.title}`;
   if ($('#lobby-join-interviewer')) {

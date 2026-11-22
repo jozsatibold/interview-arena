@@ -65,6 +65,7 @@ export function getDb() {
       mic_mode TEXT NOT NULL DEFAULT 'manual',
       default_layout TEXT NOT NULL DEFAULT 'spotlight',
       default_duration_minutes INTEGER NOT NULL DEFAULT 12,
+      target_role_track TEXT NOT NULL DEFAULT 'auto',
       power_ups_json TEXT NOT NULL,
       completed_days_json TEXT NOT NULL
     );
@@ -168,6 +169,7 @@ export function getDb() {
   if (!cols.has('mic_mode')) db.exec("ALTER TABLE user_profile ADD COLUMN mic_mode TEXT NOT NULL DEFAULT 'manual'");
   if (!cols.has('default_layout')) db.exec("ALTER TABLE user_profile ADD COLUMN default_layout TEXT NOT NULL DEFAULT 'spotlight'");
   if (!cols.has('default_duration_minutes')) db.exec('ALTER TABLE user_profile ADD COLUMN default_duration_minutes INTEGER NOT NULL DEFAULT 12');
+  if (!cols.has('target_role_track')) db.exec("ALTER TABLE user_profile ADD COLUMN target_role_track TEXT NOT NULL DEFAULT 'auto'");
 
   const sessCols = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name));
   if (!sessCols.has('speech_metrics_json')) db.exec('ALTER TABLE sessions ADD COLUMN speech_metrics_json TEXT');
@@ -207,9 +209,9 @@ function upsertUserProfileSync(db, state) {
       id, xp, gems, streak, last_practice_date, streak_freezes,
       selected_model, model_context_tier, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
       default_auto_speak, default_continuous_flow, avatar_quality,
-      default_exam_mode, show_captions, call_ambient_audio, mic_mode, default_layout, default_duration_minutes,
+      default_exam_mode, show_captions, call_ambient_audio, mic_mode, default_layout, default_duration_minutes, target_role_track,
       power_ups_json, completed_days_json
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       xp = excluded.xp,
       gems = excluded.gems,
@@ -232,6 +234,7 @@ function upsertUserProfileSync(db, state) {
       mic_mode = excluded.mic_mode,
       default_layout = excluded.default_layout,
       default_duration_minutes = excluded.default_duration_minutes,
+      target_role_track = excluded.target_role_track,
       power_ups_json = excluded.power_ups_json,
       completed_days_json = excluded.completed_days_json
   `).run(
@@ -256,6 +259,7 @@ function upsertUserProfileSync(db, state) {
     ['manual', 'ptt', 'handsfree'].includes(state.micMode) ? state.micMode : 'manual',
     ['spotlight', 'split'].includes(state.defaultLayout) ? state.defaultLayout : 'spotlight',
     [8, 12, 15, 25].includes(Number(state.defaultDurationMinutes)) ? Number(state.defaultDurationMinutes) : 12,
+    String(state.targetRoleTrack || 'auto').slice(0, 32),
     JSON.stringify(state.powerUps || DEFAULT_STATE.powerUps),
     JSON.stringify(Array.isArray(state.completedDays) ? state.completedDays : [])
   );
@@ -393,6 +397,7 @@ function readStateSync(db) {
     micMode: ['manual', 'ptt', 'handsfree'].includes(row.mic_mode) ? row.mic_mode : 'manual',
     defaultLayout: ['spotlight', 'split'].includes(row.default_layout) ? row.default_layout : 'spotlight',
     defaultDurationMinutes: [8, 12, 15, 25].includes(Number(row.default_duration_minutes)) ? Number(row.default_duration_minutes) : 12,
+    targetRoleTrack: String(row.target_role_track || 'auto'),
     powerUps: { ...DEFAULT_STATE.powerUps, ...JSON.parse(row.power_ups_json || '{}') },
     completedDays: JSON.parse(row.completed_days_json || '[]'),
     sessions,

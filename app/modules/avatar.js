@@ -1,5 +1,6 @@
 import { esc } from '../components.js';
 import { $, state } from './state.js';
+import { getTopicUiLabels } from '../../shared/role-archetypes.mjs';
 import { rollDetailedDna, startDetailedAvatarLoop, stopDetailedAvatarLoopsExcept } from './avatar-detailed.js';
 import { startSvgAvatarLoop, stopSvgAvatarLoopsExcept } from './avatar-svg-live.js';
 import { getSpeechLipLevel, getSpeechViseme } from './voice-media.js';
@@ -495,11 +496,12 @@ export function updateAvatarStage() {
   const isTutor = state.activeSession?.mode === 'tutor';
   const isLogic = state.activeSession?.mode === 'logic';
   const isPractice = isTutor || isLogic;
+  const topicLabels = getTopicUiLabels(state.catalog?.effectiveArchKey || 'general');
   $('#avatar-role-badge').textContent = isLogic
     ? (state.activeSession?.guestMode ? '🧑 Guest · 🧩 Logic' : '🧩 Logic Puzzle')
     : isTutor
       ? (state.activeSession?.guestMode ? '🧑 Guest Practice' : '🗣️ Practice')
-      : `${meta.code} · ${meta.topic}`;
+      : `${meta.code} · ${topicLabels[meta.topic] || meta.topic}`;
   $('#avatar-name').textContent = isPractice
     ? `${state.activeSession?.tutorTeacher?.name || meta.avatarName} · ${meta.title}`
     : `${meta.avatarName} · ${meta.title}`;

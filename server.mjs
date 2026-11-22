@@ -11,6 +11,7 @@ import {
   FIXED_TUTOR_PERSONALITY,
   FIXED_LOGIC_PERSONALITY
 } from './personalities.mjs';
+import { ROLE_ARCHETYPES } from './shared/role-archetypes.mjs';
 import { LOGIC_DIFFICULTIES, LOGIC_CATEGORIES } from './logic-puzzles.mjs';
 import {
   ROOT_DIR,
@@ -180,6 +181,12 @@ function applyStatePatch(state, patch) {
   if (['manual', 'ptt', 'handsfree'].includes(patch.micMode)) state.micMode = patch.micMode;
   if (['spotlight', 'split'].includes(patch.defaultLayout)) state.defaultLayout = patch.defaultLayout;
   if ([8, 12, 15, 25].includes(Number(patch.defaultDurationMinutes))) state.defaultDurationMinutes = Number(patch.defaultDurationMinutes);
+  if (typeof patch.targetRoleTrack === 'string') {
+    const cleanTrack = patch.targetRoleTrack.trim();
+    if (cleanTrack === 'auto' || Object.hasOwn(ROLE_ARCHETYPES, cleanTrack)) {
+      state.targetRoleTrack = cleanTrack;
+    }
+  }
 
   if (patch.usePowerUp) {
     const key = String(patch.usePowerUp);
@@ -291,11 +298,14 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/zonos/logs' && method === 'GET') return sendJson(res, 200, await getZonosSetupLogsPayload());
 
     if (pathname === '/api/catalog' && method === 'GET') {
-      const bundle = await buildCvResponseBundle();
+      const userState = await ensureState();
+      const bundle = await buildCvResponseBundle(null, userState.targetRoleTrack || 'auto');
       const cheatsheetPath = path.join(ROOT_DIR, 'cheatsheets', 'anti-freeze-phrases-and-star-stories.md');
       const cheatsheetMd = existsSync(cheatsheetPath) ? await fs.readFile(cheatsheetPath, 'utf8').catch(() => '') : '';
       return sendJson(res, 200, {
         needsOnboarding: bundle.needsOnboarding,
+        activeRoleTrack: bundle.activeRoleTrack,
+        effectiveArchKey: bundle.effectiveArchKey,
         agents: bundle.agents,
         personalitiesByTopic: PERSONALITIES_BY_TOPIC,
         personalityDimensions: PERSONALITY_DIMENSIONS,
@@ -350,20 +360,25 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/cv') {
-      if (method === 'GET') return sendJson(res, 200, await buildCvResponseBundle());
+      const userState = await ensureState();
+      const track = userState.targetRoleTrack || 'auto';
+      if (method === 'GET') return sendJson(res, 200, await buildCvResponseBundle(null, track));
       if (method === 'DELETE') {
         const targetId = url.searchParams.get('id');
         if (!targetId) return sendJson(res, 400, { error: 'Missing id' });
-        return sendJson(res, 200, await buildCvResponseBundle(await deleteCvVersion(targetId)));
+        return sendJson(res, 200, await buildCvResponseBundle(await deleteCvVersion(targetId), track));
       }
     }
     if (pathname === '/api/cv/activate' && method === 'POST') {
       const { id } = await readJsonBody(req);
       if (!id) return sendJson(res, 400, { error: 'Missing CV id' });
-      return sendJson(res, 200, await buildCvResponseBundle(await activateCvVersion(id)));
+      const userState = await ensureState();
+      return sendJson(res, 200, await buildCvResponseBundle(await activateCvVersion(id), userState.targetRoleTrack || 'auto'));
     }
     if (pathname === '/api/cv/fake-jobs' && method === 'POST') {
-      return sendJson(res, 200, await generateFakeJobForActiveCv(await readJsonBody(req)));
+      const body = await readJsonBody(req);
+      const userState = await ensureState();
+      return sendJson(res, 200, await generateFakeJobForActiveCv({ ...body, targetRoleTrack: body.targetRoleTrack || userState.targetRoleTrack || 'auto' }));
     }
     if (pathname === '/api/cv/upload-stream' && method === 'POST') {
       const body = await readJsonBody(req, 15 * 1024 * 1024);

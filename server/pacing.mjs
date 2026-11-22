@@ -4,6 +4,8 @@
  * by structuring interviews into Warm-Up -> Broad Intro -> Bridged Exploration -> Smooth Wrap-Up.
  */
 
+import { getRoleCategory, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+
 /**
  * Remove legacy "How to Start Immediately" sections from static agent markdown prompts
  * so abrupt hardcoded openers do not override the phased warm-up funnel.
@@ -17,8 +19,208 @@ export function stripStaticOpenerSection(mdText) {
 /**
  * Resolve the current interview conversation phase and tailored pacing/opener instructions.
  */
-export function getTopicScopeContract(topic = 'HR') {
+export function getTopicScopeContract(topic = 'HR', archKey = 'general') {
   const key = String(topic || 'HR').trim();
+  const cat = getRoleCategory(archKey);
+  const archLabel = (ROLE_ARCHETYPES[archKey] || ROLE_ARCHETYPES.general).label;
+
+  if (cat === 'executive') {
+    const execContracts = {
+      HR: {
+        allowed: `executive mandate alignment, ${archLabel} career trajectory, board/investor fit, leadership ethos, and target compensation`,
+        forbidden: 'NEVER run IC coding quizzes, framework internals, or low-level syntax trivia',
+        deflect: 'Politely redirect any low-level coding or off-topic requests back to executive mandate and leadership fit.'
+      },
+      Behavioral: {
+        allowed: 'hard executive calls, org turnarounds, executive conflict, accountability, and strategic leadership impact',
+        forbidden: 'NEVER turn this into coding trivia or low-level debugging',
+        deflect: 'Steer off-topic or IC-level coding tangents back to executive leadership decisions and outcomes.'
+      },
+      Technical: {
+        allowed: `${archLabel} domain strategy, unit economics/P&L, operating cadence, cross-functional scaling, risk/compliance, and FinOps trade-offs`,
+        forbidden: 'NEVER quiz algorithmic coding syntax or trivial UI/ORM trivia',
+        deflect: 'Redirect low-level syntax questions back to strategic, financial, or organizational trade-offs.'
+      },
+      'Live Coding': {
+        allowed: `live executive decision scenarios for ${archLabel} (budget cuts, SLA crises, strategic pivots, organizational bottlenecks)`,
+        forbidden: 'NEVER ask the candidate to write code or solve LeetCode algorithms',
+        deflect: 'Keep the focus strictly on structured executive case reasoning and defensible trade-offs.'
+      },
+      'System Design': {
+        allowed: `multi-year ${archLabel} operating model design, org topology, capital/R&D allocation, and enterprise scale resilience`,
+        forbidden: 'NEVER conduct salary negotiation or trivia quizzes',
+        deflect: 'Bring discussion back to macro org/system architecture and scaling cadence.'
+      },
+      Negotiation: {
+        allowed: `${archLabel} executive scope, equity/vesting, performance bonus, severance/mandate, and start timeline`,
+        forbidden: 'NEVER run operational crises or technical trivia',
+        deflect: 'Steer conversation back to executive compensation and mandate terms.'
+      }
+    };
+    return execContracts[key] || execContracts.Technical;
+  }
+
+  if (cat === 'product' || cat === 'design') {
+    const prodContracts = {
+      HR: {
+        allowed: `${archLabel} career summary, product/design mindset, cross-functional fit, remote setup, and compensation alignment`,
+        forbidden: 'NEVER run coding quizzes, algorithm tests, or deep backend trivia',
+        deflect: 'Politely keep the screen focused on product/design role fit and trajectory.'
+      },
+      Behavioral: {
+        allowed: 'stakeholder conflict, saying no to executives, cross-functional leadership with Eng/Sales, ownership, and measurable user/business impact',
+        forbidden: 'NEVER turn this into programming quizzes or compensation negotiation',
+        deflect: 'Steer back to concrete product/design collaboration stories and outcomes.'
+      },
+      Technical: {
+        allowed: `${archLabel} craft: discovery, North Star/UX metrics, backlog/prioritization, experimentation, accessibility/design systems, and technical feasibility fluency`,
+        forbidden: 'NEVER ask the candidate to write code or invert binary trees',
+        deflect: 'Redirect pure implementation syntax tangents back to user value, metrics, and scope trade-offs.'
+      },
+      'Live Coding': {
+        allowed: `live ${archLabel} case/critique exercise (clarifying user segment & goal metric, RICE/backlog splitting, edge cases, or UX flow critique)`,
+        forbidden: 'NEVER ask the candidate to write programming code',
+        deflect: 'Guide the candidate cleanly through structured product/UX case reasoning.'
+      },
+      'System Design': {
+        allowed: `end-to-end ${archLabel} strategy case (0-to-1 launch, monetization/pricing, multi-product design system, or roadmap architecture)`,
+        forbidden: 'NEVER drift into HR salary talk or low-level code trivia',
+        deflect: 'Keep focus on cohesive product/design strategy and measurable impact.'
+      },
+      Negotiation: {
+        allowed: 'scope, seniority band, equity, compensation, notice period, and start timeline',
+        forbidden: 'NEVER run product/design case quizzes during negotiation',
+        deflect: 'Steer back to compensation and role scope alignment.'
+      }
+    };
+    return prodContracts[key] || prodContracts.Technical;
+  }
+
+  if (cat === 'gtm') {
+    const gtmContracts = {
+      HR: {
+        allowed: `${archLabel} career scope, ACV/GTM motion history, target quota/pipeline impact, remote setup, and OTE expectations`,
+        forbidden: 'NEVER ask programming, algorithm, or engineering syntax questions',
+        deflect: 'Keep the screen tightly focused on commercial/GTM trajectory and fit.'
+      },
+      Behavioral: {
+        allowed: 'high-stakes deal recovery, killing failing campaigns, cross-org Sales/Product/CS alignment, and accountability',
+        forbidden: 'NEVER turn this into coding trivia or OTE contract negotiation',
+        deflect: 'Steer back to concrete GTM leadership and revenue outcomes.'
+      },
+      Technical: {
+        allowed: `${archLabel} craft: pipeline coverage math, MEDDPICC, ICP positioning, CAC/LTV payback, attribution, and pricing/give-get levers`,
+        forbidden: 'NEVER quiz software code or infrastructure trivia',
+        deflect: 'Redirect technical implementation tangents back to buyer impact, pipeline math, and conversion metrics.'
+      },
+      'Live Coding': {
+        allowed: `live ${archLabel} deal/funnel clinic (diagnosing forecast slippage, CAC spike, or 35% discount pressure — NO coding)`,
+        forbidden: 'NEVER ask the candidate to write code',
+        deflect: 'Guide the candidate strictly through commercial/growth diagnosis and step-by-step action plan.'
+      },
+      'System Design': {
+        allowed: `scalable ${archLabel} revenue engine or demand architecture (territory design, PLG-to-Enterprise funnel, launch tiering)`,
+        forbidden: 'NEVER drift into OTE salary negotiation or coding quizzes',
+        deflect: 'Refocus on durable GTM systems, org ratios, and compounding net retention.'
+      },
+      Negotiation: {
+        allowed: 'base/variable OTE split, accelerators, ramp draw, budget authority, and start timeline',
+        forbidden: 'NEVER run deal clinics or GTM tests during comp negotiation',
+        deflect: 'Keep discussion anchored on compensation and commercial mandate.'
+      }
+    };
+    return gtmContracts[key] || gtmContracts.Technical;
+  }
+
+  if (cat === 'solutions') {
+    const solContracts = {
+      HR: {
+        allowed: `${archLabel} pre-sales/customer engineering trajectory, enterprise ACV exposure, discovery mindset, and OTE alignment`,
+        forbidden: 'NEVER turn HR screen into a live integration architecture whiteboard',
+        deflect: 'Keep focus on customer-facing technical bridge fit and logistics.'
+      },
+      Behavioral: {
+        allowed: 'handling AE pressure ethically, rescuing failing enterprise demos, InfoSec escalations, and Product feedback loops',
+        forbidden: 'NEVER turn this into low-level algorithm coding',
+        deflect: 'Steer back to concrete enterprise customer collaboration stories.'
+      },
+      Technical: {
+        allowed: `${archLabel} architecture: SAML/OIDC SSO, SCIM provisioning, idempotent webhooks, GDPR/SOC2 trust boundaries, and PoC scoping`,
+        forbidden: 'NEVER run comp OTE negotiation or LeetCode puzzles',
+        deflect: 'Redirect into customer integration feasibility, security trust, and PoC criteria.'
+      },
+      'Live Coding': {
+        allowed: `live ${archLabel} customer discovery & PoC scoping clinic (blocking scope creep while locking pass/fail exit criteria)`,
+        forbidden: 'NEVER run disconnected algorithm trivia',
+        deflect: 'Keep the candidate inside realistic customer discovery and architecture trade-offs.'
+      },
+      'System Design': {
+        allowed: 'end-to-end enterprise client integration blueprint (SSO, Async Event Sync, EU Data Residency, Failover)',
+        forbidden: 'NEVER drift into salary negotiation',
+        deflect: 'Focus strictly on customer-facing integration architecture and risk mitigation.'
+      },
+      Negotiation: {
+        allowed: 'Base/Variable split (75/25), pooled vs quota commission, scope, and start date',
+        forbidden: 'NEVER run PoC drills during compensation negotiation',
+        deflect: 'Steer back to SA/SE compensation structure and role scope.'
+      }
+    };
+    return solContracts[key] || solContracts.Technical;
+  }
+
+  if (archKey === 'em') {
+    const emContracts = {
+      HR: {
+        allowed: 'engineering management trajectory, team size managed, people vs technical leadership balance, and comp expectations',
+        forbidden: 'NEVER run IC algorithm/coding quizzes or syntax trivia',
+        deflect: 'Keep the screen focused on management scope, org stage, and leadership fit.'
+      },
+      Behavioral: {
+        allowed: 'coaching underperformers, PIPs, hiring rubrics, mediating Staff/PM conflict, burnout prevention, and retention',
+        forbidden: 'NEVER turn this into live coding trivia or salary negotiation',
+        deflect: 'Steer back to concrete people leadership and delivery outcomes.'
+      },
+      Technical: {
+        allowed: 'delivery predictability (DORA/WIP), architectural risk oversight, incident culture, reliability budgets, and technical coaching',
+        forbidden: 'NEVER quiz LeetCode algorithms or low-level language syntax',
+        deflect: 'Redirect low-level syntax tangents back to engineering execution, risk management, and team leverage.'
+      },
+      'Live Coding': {
+        allowed: 'live Engineering Management People & Delivery Scenario (resignation threat, mid-sprint scope clash, burnout recovery)',
+        forbidden: 'NEVER ask the candidate to write programming code or LeetCode algorithms',
+        deflect: 'Keep the scenario anchored on people judgment, explicit PM trade-offs, and sustainable team execution.'
+      },
+      'System Design': {
+        allowed: 'multi-squad team topology, on-call health, hiring/career ladders, and scaling engineering rituals from 10 to 40 devs',
+        forbidden: 'NEVER drift into compensation negotiation or coding trivia',
+        deflect: 'Bring discussion back to org topology and engineering operating model.'
+      },
+      Negotiation: {
+        allowed: 'M3/M4 level scope, headcount budget, equity, compensation, and reporting line',
+        forbidden: 'NEVER run people crisis simulations during offer negotiation',
+        deflect: 'Keep focus on EM scope and compensation alignment.'
+      }
+    };
+    return emContracts[key] || emContracts.Technical;
+  }
+
+  if (cat === 'tpm' || cat === 'csm' || cat === 'people') {
+    const nonCodeMeta = {
+      tpm: { craft: 'critical path, RAID governance, cross-org dependencies, Go/No-Go launch readiness, and BLUF executive updates', live: 'live program rescue scenario (3-week API/InfoSec slip, scope cut & VP escalation)', design: '120-engineer cross-org planning, dependency intake, and release cadence' },
+      csm: { craft: 'NRR/GRR health scoring, TTFV onboarding, ROI-anchored QBRs, and Tier-3 technical escalation triage', live: 'live enterprise churn rescue & QBR scenario (departed champion, adoption drop)', design: 'segmented CS & TAM operating model (tech-touch SMB to high-touch Enterprise)' },
+      people: { craft: 'recruiting funnel pass-through math, structured rubrics, leveling/comp bands, attrition diagnostics, and EU HRBP compliance', live: 'live hiring bottleneck or high-attrition manager coaching case', design: 'end-to-end talent, leveling, onboarding, and performance calibration OS' }
+    }[cat];
+    const opsContracts = {
+      HR: { allowed: `${archLabel} career mandate, org scale, stakeholder impact, and target compensation`, forbidden: 'NEVER ask programming or algorithm coding questions', deflect: 'Keep focus on role trajectory and alignment.' },
+      Behavioral: { allowed: 'hard cross-functional pushes, stakeholder escalations, ethical boundaries, and measurable org/retention impact', forbidden: 'NEVER turn this into coding quizzes or comp talk', deflect: 'Steer back to concrete STAR leadership stories.' },
+      Technical: { allowed: `${archLabel} mastery: ${nonCodeMeta.craft}`, forbidden: 'NEVER ask programming code or syntax trivia', deflect: `Redirect coding tangents back to ${archLabel} craft and metrics.` },
+      'Live Coding': { allowed: `${nonCodeMeta.live} (NO coding)`, forbidden: 'NEVER ask the candidate to write programming code', deflect: 'Keep the focus strictly on structured operational/people diagnosis and clear action options.' },
+      'System Design': { allowed: `${nonCodeMeta.design}`, forbidden: 'NEVER drift into salary negotiation or coding quizzes', deflect: 'Keep discussion anchored on scalable operating system design.' },
+      Negotiation: { allowed: 'seniority band, OTE/bonus structure, scope/budget authority, and start date', forbidden: 'NEVER run operational case drills during negotiation', deflect: 'Steer back to compensation and mandate alignment.' }
+    };
+    return opsContracts[key] || opsContracts.Technical;
+  }
+
   const contracts = {
     HR: {
       allowed: 'career summary, motivation for changing roles, team & communication fit, remote setup, availability/notice period, and high-level compensation alignment',
@@ -31,7 +233,7 @@ export function getTopicScopeContract(topic = 'HR') {
       deflect: 'If the candidate goes off-topic or asks unrelated technical/non-interview questions, politely push back in character and steer back to concrete behavioral experiences.'
     },
     Technical: {
-      allowed: 'production engineering decisions, stack trade-offs, performance, debugging, testing, and system reliability',
+      allowed: `production ${archLabel} decisions, trade-offs, performance, debugging/triage, testing/security, and reliability`,
       forbidden: 'NEVER conduct HR salary/notice negotiation or unrelated non-interview tasks',
       deflect: 'If the candidate steers into HR compensation details or off-topic/non-interview requests, politely redirect (e.g., "Our recruiter handles compensation separately—let us keep focusing on the technical work") back to engineering depth.'
     },
@@ -212,6 +414,7 @@ export function buildInterviewPrompt({
   meta = null,
   companyName = '',
   topic = 'HR',
+  archKey = 'general',
   firstName = 'there',
   personalityBlock = '',
   pacing,
@@ -236,7 +439,7 @@ export function buildInterviewPrompt({
   const summaryLine = earlierSummary ? `\n${earlierSummary}` : '';
   const speakerName = meta?.avatarName || 'Interviewer';
   const roleLabel = meta?.title || topic;
-  const scopeContract = getTopicScopeContract(topic);
+  const scopeContract = getTopicScopeContract(topic, archKey);
   const identityHeader = companyName
     ? `YOU ARE: ${speakerName} from ${companyName} (${roleLabel} — Round Type: ${topic}).\nCOMPANY IDENTITY RULE: Your hiring company is ONLY ${companyName}. Any company names mentioned in Candidate CV below are ${firstName}'s PAST employers—NEVER introduce yourself as working at a company from the candidate's CV!`
     : `YOU ARE: ${speakerName} (${roleLabel} — Round Type: ${topic}).`;

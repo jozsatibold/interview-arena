@@ -1,6 +1,17 @@
 import { esc, saveUserState } from '../components.js';
+import { getTopicUiLabels, getRoleCategory } from '/shared/role-archetypes.mjs';
 import { $, state } from './state.js';
 import { speakEnglish } from './voice-media.js';
+
+function getDomainDepthLabel() {
+  const archKey = state.catalog?.effectiveArchKey || 'general';
+  const cat = getRoleCategory(archKey);
+  if (cat === 'executive') return 'Strategy & Business ROI';
+  if (cat === 'product' || cat === 'design') return 'Product / UX Depth & ROI';
+  if (cat === 'gtm' || cat === 'csm') return 'Commercial & NRR ROI';
+  if (cat === 'tpm' || cat === 'people' || archKey === 'em') return 'Leadership & Ops Depth';
+  return 'Domain Depth & ROI';
+}
 
 export function computeLeague(xp, sessions) {
   const avg = sessions.length
@@ -70,7 +81,7 @@ export function showScorecardDialog(sc, xpEarned, extra = {}) {
     <div class="stats-summary-grid">
       <div class="kpi-card"><small>English &amp; Vocab</small><strong>${esc(s.english)}/10</strong></div>
       <div class="kpi-card"><small>Analysis / Anti-Freeze</small><strong>${esc(s.analysis)}/10</strong></div>
-      <div class="kpi-card"><small>Tech Depth &amp; ROI</small><strong>${esc(s.techRoi)}/10</strong></div>
+      <div class="kpi-card"><small>${esc(getDomainDepthLabel())}</small><strong>${esc(s.techRoi)}/10</strong></div>
       <div class="kpi-card"><small>Confidence</small><strong>${esc(s.confidence)}/10</strong></div>
     </div>
     ${metricsHtml}
@@ -234,6 +245,7 @@ export function renderStats() {
     `;
   }
 
+  const topicLabels = getTopicUiLabels(state.catalog?.effectiveArchKey || 'general');
   const topics = ['HR', 'Behavioral', 'Technical', 'Live Coding', 'System Design', 'Negotiation'];
   $('#topic-bars').innerHTML = topics
     .map((topic) => {
@@ -242,7 +254,7 @@ export function renderStats() {
       const pct = Math.round((avg / 10) * 100);
       return `
         <div class="bar-row">
-          <div class="bar-label"><span>${esc(topic)} (${list.length} drills)</span><span>${list.length ? avg.toFixed(1) + ' / 10' : 'Not practiced'}</span></div>
+          <div class="bar-label"><span>${esc(topicLabels[topic] || topic)} (${list.length} drills)</span><span>${list.length ? avg.toFixed(1) + ' / 10' : 'Not practiced'}</span></div>
           <div class="bar-track"><div class="bar-fill" style="--bar-pct: ${pct}%;"></div></div>
         </div>
       `;
@@ -252,7 +264,7 @@ export function renderStats() {
   const dims = [
     ['english', 'English Grammar & Senior Vocabulary'],
     ['analysis', 'Structured Analysis & Anti-Freeze Control'],
-    ['techRoi', 'Technical Depth & Business ROI'],
+    ['techRoi', getDomainDepthLabel()],
     ['confidence', 'Confidence & Senior Executive Presence']
   ];
   $('#dimension-bars').innerHTML = dims

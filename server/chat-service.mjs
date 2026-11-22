@@ -4,7 +4,6 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   pickPersonality,
-  FIXED_TUTOR_PERSONALITY,
   FIXED_LOGIC_PERSONALITY
 } from '../personalities.mjs';
 import {
@@ -13,12 +12,13 @@ import {
   buildTurnContextAddendum,
   trimConversationForTier,
   buildInterviewPrompt,
-  TUTOR_PACING_RULE,
   LOGIC_PACING_RULE
 } from './pacing.mjs';
 import { findArtifactById, isScreenShareAllowedTopic } from '../shared/interview-artifacts.mjs';
 import { resolveEffectiveContextTier } from '../shared/model-tiers.mjs';
-import { getAdaptedAgents, buildDynamicAgentDirective } from '../role-adapter.mjs';
+import { formatKnowledgeForInterviewer, formatKnowledgeForDebrief } from '../shared/role-knowledge.mjs';
+import { formatTechStacksForInterviewer } from '../shared/kb-tech-stacks.mjs';
+import { resolveEffectiveArchetype, getAdaptedAgents, buildDynamicAgentDirective } from '../role-adapter.mjs';
 import {
   LOGIC_DIFFICULTIES,
   LOGIC_CATEGORIES,
@@ -60,7 +60,8 @@ import { resolveTargetContext } from './document-service.mjs';
 import {
   pickFreshTutorAngle,
   buildStudentMemoryBrief,
-  scheduleStudentMemoryUpdate
+  scheduleStudentMemoryUpdate,
+  buildTutorSystemPrompt
 } from './tutor-memory.mjs';
 
 const transientLogicPuzzles = new Map();
@@ -310,39 +311,6 @@ export function extractCoachMeta(parsedMeta) {
   };
 }
 
-function buildTutorSystemPrompt({ teacher, topicObj, customTopic = '', tutorLevel = 'B2-C1', firstName = 'there', stackSummary = '', studentBrief = '', retryOf = null, action = 'turn' }) {
-  const activeTopicText = String(customTopic || '').trim() || topicObj?.prompt || 'Natural everyday English conversation and helpful grammar coaching';
-  return `You are ${teacher.name}, a grounded, observant, encouraging female English language teacher (${teacher.accent} · ${teacher.specialty}).
-Student first name: ${firstName}${stackSummary ? ` (Software background: ${stackSummary})` : ''}.
-English Target Level: ${tutorLevel}.
-Lesson Focus: ${activeTopicText}.${studentBrief}
-
-${FIXED_TUTOR_PERSONALITY.prompt}
-${TUTOR_PACING_RULE}
-
-CORE TEACHING & REALISM RULES (CRITICAL):
-1. ANTI-SYCOPHANCY / PROPORTIONAL REACTIONS: NEVER say hollow hype like "Amazing!", "Awesome!", "Fantastic!", "Brilliant!" on ordinary, routine, tiring, or technical things! Match your reaction proportionally and honestly to what ${firstName} actually said.
-2. PERSONALIZED ANALOGIES & DIVERSE EXPLORATION: If explaining a grammar rule or subtle nuance, use analogies matching ${firstName}'s thinking style and known hobbies/work when it fits naturally — and keep the chat moving across varied, interesting adjacent subjects with gentle bridges.
-3. PATIENT TEACHING & WHY: Whenever ${firstName} makes a genuine grammar mistake or awkward literal phrasing, react patiently and warmly first, model the natural phrasing kindly, explain WHY concisely in 1-2 sentences, and ask one supportive follow-up question.
-4. CRISP EXPRESSIVE OPENER: Start every reply with ONE short 3-7 word proportionally attuned spoken sentence, then continue in 2-3 patient spoken sentences (NO markdown, NO asterisks, NO emojis, NO bullet points).
-5. LANGUAGE RULE: English ONLY everywhere. Ignore minor voice-recognition phonetic typos.
-6. STAY IN ROLE & DEFLECT OFF-SCOPE: You are strictly an English communication teacher. NEVER act as a technical interviewer, coding assistant, or general-purpose chatbot. If ${firstName} asks for code solutions, system design quizzes, or unrelated off-topic tasks, politely deflect in character and steer the conversation back to English speaking practice.
-
-STREAMING OUTPUT CONTRACT (FOLLOW EXACTLY):
-1. First, write ONLY your spoken English teacher reply.
-2. Put exact delimiter on its own line:
-${COACH_JSON_DELIMITER}
-3. Immediately after the delimiter, write ONE compact JSON object in English ONLY:
-{
-  "expression": "warm" | "curious" | "firm" | "amused" | "skeptical",
-  "coachPause": null,
-  "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Preposition"|"Tense"|"Word-Choice","said":"exact phrase student said that had an issue","better":"natural English correction","why":"Clear 1-2 sentence explanation tailored to student's thinking style"}],
-  "microTipHu": null | "1 short practical English takeaway"
-}
-On EVERY "turn" (not "start"): include 1-2 "grammarFixes" ONLY when something grammatical or phrasing-wise actually warrants improving (leave [] if clean!). On "start", set "grammarFixes": [].
-${action === 'turn' && retryOf?.better ? `\nRETRY PRACTICE NOTE: ${firstName} clicked "Say It Again" to practice saying "${String(retryOf.better).slice(0, 240)}" aloud! Acknowledge naturally (grounded, not over-hyped), confirm why it works cleanly, and continue.` : ''}`;
-}
-
 function buildLogicSystemPrompt({ teacher, puzzle, firstName = 'there', scratchpadText = '', scratchpadChanged = false, remainingSeconds = null, studentBrief = '', guestMode = false, boardCheckOnly = false }) {
   const minsLeft = remainingSeconds !== null && remainingSeconds !== undefined
     ? `${Math.floor(remainingSeconds / 60)}m ${String(remainingSeconds % 60).padStart(2, '0')}s remaining of ${puzzle.durationMinutes} min budget`
@@ -420,6 +388,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     action = 'turn',
     topic = 'HR',
     day = null,
+    targetRoleTrack = '',
     continuousFlow,
     elapsedSeconds = null,
     targetDurationSeconds = null,
@@ -433,13 +402,19 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
 
   const isGuestSession = Boolean(guestMode && (mode === 'tutor' || mode === 'logic'));
   const activeCv = isGuestSession ? null : await getActiveCv();
-  const savedState = modelContextTier ? null : await ensureState();
+  const savedState = (!modelContextTier || !targetRoleTrack) ? await ensureState() : null;
+  const resolvedRoleTrack = String(targetRoleTrack || savedState?.targetRoleTrack || 'auto').trim() || 'auto';
+  const effectiveArchKey = resolveEffectiveArchetype(activeCv, resolvedRoleTrack);
   const tierInfo = resolveEffectiveContextTier({
     preference: modelContextTier || savedState?.modelContextTier || 'auto',
     modelName: model,
     modelMeta: getCachedModelMeta(model)
   });
-  const useStaticAgentFile = !isGuestSession && (!activeCv || activeCv.id === 'cv-baseline-1');
+  const useStaticAgentFile =
+    !isGuestSession &&
+    (!activeCv || activeCv.id === 'cv-baseline-1') &&
+    resolvedRoleTrack === 'auto' &&
+    effectiveArchKey === 'frontend';
   const firstName = isGuestSession
     ? 'Guest'
     : (String(activeCv?.profile?.candidateName || 'there').trim().split(/\s+/)[0] || 'there');
@@ -551,7 +526,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       err.statusCode = 400;
       throw err;
     }
-    const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv);
+    const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv, resolvedRoleTrack);
     const meta = adaptedAgents.find((a) => a.id === validMeta.id) || validMeta;
     const personality = pickPersonality(topic, personalityTraits || personalityId);
     const personalityBlock = `INTERVIEWER PERSONALITY (${personality.emoji} ${personality.label} — ${personality.mood}):\nEmbody this realistic human personality naturally without exaggerating or becoming extreme.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
@@ -567,10 +542,14 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       : (cleanReqCompany && !companyAppearsInText(cleanReqCompany, cvGuardText))
         ? cleanReqCompany
         : pickRandomCompanyName(cvGuardText);
+    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day, companyName: resolvedCompany, targetRoleTrack: resolvedRoleTrack }, jdLimit);
+    const tierId = tierInfo.id || (tierInfo.budgets.compactPrompt ? 'small' : 'medium');
+    const stackAddendum = useStaticAgentFile
+      ? formatTechStacksForInterviewer({ archKey: effectiveArchKey, cvText: activeCv?.rawText || '', coreStack: activeCv?.profile?.coreStack || [], jdText: jdPrompt, topic, tier: tierId })
+      : '';
     const agentPrompt = useStaticAgentFile
-      ? summarizeMdPrompt(rawAgentMd, agentLimit)
-      : summarizeMdPrompt(buildDynamicAgentDirective({ meta, activeCv, companyName: resolvedCompany }), agentLimit);
-    const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day, companyName: resolvedCompany }, jdLimit);
+      ? summarizeMdPrompt(`${rawAgentMd}\n\n${formatKnowledgeForInterviewer({ archKey: effectiveArchKey, topic, tier: tierId })}${stackAddendum ? `\n\n${stackAddendum}` : ''}`, agentLimit)
+      : summarizeMdPrompt(buildDynamicAgentDirective({ meta, activeCv, companyName: resolvedCompany, archKey: effectiveArchKey, tier: tierId, compactMode: tierInfo.budgets.compactPrompt, jdText: jdPrompt }), agentLimit);
     const pacing = buildInterviewPacingDirectives({
       action,
       topic,
@@ -603,6 +582,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         meta,
         companyName: resolvedCompany,
         topic,
+        archKey: effectiveArchKey,
         firstName,
         personalityBlock,
         pacing,
@@ -622,7 +602,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       return {
         model, mode, isGuestSession, firstName, normalizedMsgs, tierInfo, earlierSummary,
         topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
-        interviewFinishMeta: { coreRules, personalityBlock, agentPrompt, jdPrompt, activeCv, meta, isContinuous },
+        interviewFinishMeta: { coreRules, personalityBlock, agentPrompt, jdPrompt, activeCv, meta, isContinuous, effectiveArchKey, effectiveTopic },
         systemPrompt: '',
         startPrompt
       };
@@ -804,7 +784,8 @@ Give 2 concrete strengths in "strengthsHu", 2 improvements in "weaknessesHu", an
     finishPrompt = 'The English lesson is wrapping up! Return a warm teacher goodbye in "spokenEnglish" and return ONLY valid JSON matching the exact schema with an encouraging "scorecard" object.';
   } else {
     const m = ctx.interviewFinishMeta;
-    systemPrompt = `${m.coreRules}\n\n${m.personalityBlock}${summaryNote}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`;
+    const kbDebrief = formatKnowledgeForDebrief({ archKey: m.effectiveArchKey || 'general', topic: m.effectiveTopic || 'Technical' });
+    systemPrompt = `${m.coreRules}\n\n${m.personalityBlock}${summaryNote}\n\n${kbDebrief}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`;
   }
 
   const budgets = ctx.tierInfo?.budgets || { numCtx: 8192, numPredict: 700 };

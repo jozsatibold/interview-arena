@@ -380,6 +380,7 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
     personalityTraits: s.mode === 'interview' ? (s.personality?.traits || null) : null,
     topic: s.topic,
     day: s.day,
+    targetRoleTrack: state.user?.targetRoleTrack || 'auto',
     messages: s.messages,
     action,
     continuousFlow,

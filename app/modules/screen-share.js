@@ -6,6 +6,7 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { $, state } from './state.js';
 import { getArtifactsForTopic, findArtifactById, isScreenShareAllowedTopic } from '../../shared/interview-artifacts.mjs';
+import { getRoleCategory } from '../../shared/role-archetypes.mjs';
 
 export function isScreenShareOpen() {
   return Boolean(state.screenShareOpen);
@@ -36,8 +37,24 @@ export function renderScreenShareForTopic(topic) {
     return;
   }
 
-  const artifacts = getArtifactsForTopic(topic);
-  if (!state.activeSession.screenShareId && artifacts[0]) {
+  const archKey = state.catalog?.effectiveArchKey || 'general';
+  const cat = getRoleCategory(archKey);
+  const notesEl = $('#screenshare-notes');
+  if (notesEl) {
+    notesEl.placeholder = cat === 'executive'
+      ? 'Optional executive notes, trade-offs, or board talking points (sent to interviewer)...'
+      : cat === 'product'
+        ? 'Optional product notes, metrics, or prioritization trade-offs (sent to interviewer)...'
+        : cat === 'gtm'
+          ? 'Optional GTM notes, pipeline math, or positioning trade-offs (sent to interviewer)...'
+          : cat === 'solutions'
+            ? 'Optional discovery notes, PoC exit criteria, or integration trade-offs (sent to interviewer)...'
+            : (cat === 'tpm' || cat === 'csm' || cat === 'people' || archKey === 'em')
+              ? 'Optional action plan, stakeholder trade-offs, or risk mitigations (sent to interviewer)...'
+              : 'Optional quick notes on this code/architecture (sent to interviewer)...';
+  }
+  const artifacts = getArtifactsForTopic(topic, archKey);
+  if (state.activeSession && !artifacts.some((a) => a.id === state.activeSession.screenShareId) && artifacts[0]) {
     state.activeSession.screenShareId = artifacts[0].id;
     state.activeSession.highlightedLines = [];
   }

@@ -1,10 +1,12 @@
 import { apiJson, esc, fillSelectOptions, saveUserState, consumeNdjsonStream } from '../components.js';
 import { resolveEffectiveContextTier, LLM_CONTEXT_TIERS } from '/shared/model-tiers.mjs';
+import { ROLE_TRACK_GROUPS, getTopicUiLabels } from '/shared/role-archetypes.mjs';
 import { $, $$, state, getCandidateIdentity, syncLinkedSelectGroup } from './state.js';
 import { updateAvatarStage, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, speakEnglish } from './voice-media.js';
 import { renderHud } from './stats-shop.js';
 import { buildJdBriefHtml, stopLobbyMicTest, openLobby } from './lobby.js';
+import { wireRolePlaybookEvents } from './role-playbook.js';
 
 let onSwitchView = () => {};
 let onCvBundleApplied = () => {};
@@ -50,9 +52,31 @@ export function renderTargetModelSelectors() {
   }
 }
 
+function renderRoleTrackSelector() {
+  const sel = $('#role-track-select');
+  if (!sel) return;
+  const activeTrack = state.user?.targetRoleTrack || state.catalog?.activeRoleTrack || 'auto';
+  if (sel.options.length === 0) {
+    const groupsHtml = ROLE_TRACK_GROUPS.map(
+      (g) => `<optgroup label="${esc(g.group)}">${g.roles.map((r) => `<option value="${esc(r.id)}">${esc(r.label)}</option>`).join('')}</optgroup>`
+    ).join('');
+    sel.innerHTML = `<option value="auto">Auto (From Active CV)</option>${groupsHtml}`;
+  }
+  sel.value = activeTrack;
+}
+
 export function renderHome() {
   const cat = state.catalog;
   if (!cat) return;
+
+  renderRoleTrackSelector();
+  const effArchKey = cat.effectiveArchKey || 'general';
+  const topicLabels = getTopicUiLabels(effArchKey);
+
+  for (const chip of $$('#view-path .chip')) {
+    const t = chip.dataset.topic;
+    if (t && t !== 'ALL' && topicLabels[t]) chip.textContent = topicLabels[t];
+  }
 
   const jdSel = $('#global-jd-select');
   if (jdSel) {
@@ -107,7 +131,7 @@ export function renderHome() {
         <span class="path-day">Day ${node.day}${isNext ? ' · Next' : ''}</span>
       </span>
       <strong class="path-title">${esc(node.title)}</strong>
-      <span class="path-topic">${esc(node.topic)}</span>
+      <span class="path-topic">${esc(topicLabels[node.topic] || node.topic)}</span>
     `;
     btn.addEventListener('click', () => openLobby({
       agentFile: node.agent,
@@ -129,7 +153,7 @@ export function renderHome() {
     card.innerHTML = `
       <div class="agent-top">
         <span class="agent-code">${esc(ag.code)}</span>
-        <span class="agent-topic">${esc(ag.avatarName || ag.topic)} · ${esc(ag.topic)}</span>
+        <span class="agent-topic">${esc(ag.avatarName || ag.topic)} · ${esc(topicLabels[ag.topic] || ag.topic)}</span>
       </div>
       <h4 class="agent-title">${esc(ag.title)}</h4>
       <button type="button" class="btn btn-primary btn-agent-launch">Enter Lobby ▶</button>
@@ -375,6 +399,7 @@ export async function refreshSetup() {
 export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBundle }) {
   onSwitchView = switchToView;
   onCvBundleApplied = applyCvCatalogBundle;
+  wireRolePlaybookEvents();
 
   for (const chip of $$('#view-path .chip')) {
     chip.addEventListener('click', () => {
@@ -384,6 +409,17 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
       renderHome();
     });
   }
+
+  $('#role-track-select')?.addEventListener('change', async (e) => {
+    const nextTrack = e.target.value || 'auto';
+    if (state.user) state.user.targetRoleTrack = nextTrack;
+    try {
+      state.user = await saveUserState({ targetRoleTrack: nextTrack });
+      const freshCatalog = await apiJson('/api/catalog', null, 'GET');
+      state.catalog = freshCatalog;
+      renderHome();
+    } catch {}
+  });
 
   $('#global-jd-select')?.addEventListener('change', renderActiveFakeJobPreview);
   $('#btn-new-fake-job')?.addEventListener('click', async () => {

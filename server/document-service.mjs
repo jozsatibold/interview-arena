@@ -7,12 +7,14 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   detectRoleArchetype,
+  resolveEffectiveArchetype,
   normalizeAgentOverrides,
   getAdaptedAgents,
   normalizeGeneratedJds,
   formatFakeJdAsMarkdown,
   getActiveJobDescriptions,
   normalizeCvDailyPath,
+  adaptMorningPathForTrack,
   buildCvAnalysisPrompt,
   buildFakeJobPrompt
 } from '../role-adapter.mjs';
@@ -189,30 +191,37 @@ export async function readStaticJds() {
   return jds;
 }
 
-export async function resolveActiveJobDescriptions(activeCv) {
+export async function resolveActiveJobDescriptions(activeCv, targetRoleTrack = 'auto') {
+  if (targetRoleTrack && targetRoleTrack !== 'auto') {
+    return getActiveJobDescriptions([], activeCv, targetRoleTrack);
+  }
   if (!activeCv || activeCv.id === 'cv-baseline-1') {
     const staticJds = await readStaticJds();
     const customFake = Array.isArray(activeCv?.generatedJds) ? activeCv.generatedJds : [];
     return [...customFake.map((jd) => ({ ...jd, content: formatFakeJdAsMarkdown(jd) })), ...staticJds];
   }
-  return getActiveJobDescriptions([], activeCv);
+  return getActiveJobDescriptions([], activeCv, targetRoleTrack);
 }
 
-export async function buildCvResponseBundle(versions = null) {
+export async function buildCvResponseBundle(versions = null, targetRoleTrack = 'auto') {
   const list = versions || (await ensureCvVersions());
   const activeCv = list.find((v) => v.isActive) || list[0] || null;
   const needsOnboarding = list.length === 0 || !activeCv;
+  const track = String(targetRoleTrack || 'auto').trim() || 'auto';
+  const effectiveArchKey = resolveEffectiveArchetype(activeCv, track);
   return {
     needsOnboarding,
+    activeRoleTrack: track,
+    effectiveArchKey,
     activeCv,
     versions: list,
-    morningPath: activeCv?.dailyPath?.length ? activeCv.dailyPath : MORNING_PATH,
-    agents: getAdaptedAgents(AGENT_META, activeCv),
-    jobDescriptions: await resolveActiveJobDescriptions(activeCv)
+    morningPath: adaptMorningPathForTrack(MORNING_PATH, activeCv, AGENT_META, track),
+    agents: getAdaptedAgents(AGENT_META, activeCv, track),
+    jobDescriptions: await resolveActiveJobDescriptions(activeCv, track)
   };
 }
 
-export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fintech-bnpl.md', customInterviewId = null, customRoundId = null, day = null, companyName = '' }, maxChars = 1300) {
+export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fintech-bnpl.md', customInterviewId = null, customRoundId = null, day = null, companyName = '', targetRoleTrack = 'auto' }, maxChars = 1300) {
   if (customInterviewId) {
     const custom = (await ensureCustomInterviews()).find((c) => c.id === customInterviewId);
     if (custom) {
@@ -234,10 +243,11 @@ export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fin
     }
   }
   const activeCv = await getActiveCv();
-  const dayStep = day ? (activeCv?.dailyPath || []).find((d) => Number(d.day) === Number(day)) : null;
+  const track = String(targetRoleTrack || 'auto').trim() || 'auto';
+  const dayStep = day && track === 'auto' ? (activeCv?.dailyPath || []).find((d) => Number(d.day) === Number(day)) : null;
   const dayFocusBlock = dayStep?.focus ? `\n\nCV-TAILORED DAY ${dayStep.day} FOCUS (${dayStep.title}):\n${dayStep.focus}` : '';
 
-  const availableJds = await resolveActiveJobDescriptions(activeCv);
+  const availableJds = await resolveActiveJobDescriptions(activeCv, track);
   const matchedJd = availableJds.find((j) => j.id === jdFile) || availableJds[0];
   let baseJdText = matchedJd?.content || '';
   if (!baseJdText) {
@@ -275,11 +285,11 @@ export async function analyzeCvAndBuildDailyPath(
   const rawText = await extractDocumentText({ filename, base64Data, plainText, visionModel });
   chosenModel = await resolveAnalyzerModel(chosenModel);
 
-  emit({
+    emit({
     stageKey: 'profile',
     percent: 18,
     message: `Extracted ${rawText.length} characters · Warming up ${chosenModel}...`,
-    detail: 'Identifying your role (QA / Java / .NET / PHP / Flutter / etc.), stack & career milestones'
+    detail: 'Identifying your role (PM / PO / Tech Lead / CTO / CEO / COO / Eng), stack & milestones'
   });
 
   const prompt = buildCvAnalysisPrompt({ rawText, notes, baseAgents: AGENT_META });
@@ -384,12 +394,13 @@ export async function analyzeCvAndBuildDailyPath(
   return { version: bundle.activeCv, ...bundle };
 }
 
-export async function generateFakeJobForActiveCv({ customFocus = '', plannerModel = '' } = {}) {
+export async function generateFakeJobForActiveCv({ customFocus = '', plannerModel = '', targetRoleTrack = 'auto' } = {}) {
   const activeCv = await getActiveCv();
   if (!activeCv) throw new Error('No active CV found.');
   const chosenModel = await resolveAnalyzerModel(plannerModel);
+  const archKey = resolveEffectiveArchetype(activeCv, targetRoleTrack);
 
-  const prompt = buildFakeJobPrompt({ profile: activeCv.profile, rawText: activeCv.rawText, customFocus });
+  const prompt = buildFakeJobPrompt({ profile: activeCv.profile, rawText: activeCv.rawText, customFocus, archKey });
   const res = await fetchOllamaChat(
     {
       model: chosenModel,
@@ -422,12 +433,13 @@ export async function generateFakeJobForActiveCv({ customFocus = '', plannerMode
 }
 
 function normalizeGeneratedRounds(rawRounds, company, roleTitle) {
+  const isNonCode = /\b(ceo|coo|cto|cfo|cro|product manager|product owner|designer|ux|marketing|pmm|sales|account executive|customer success|csm|tam|people|hrbp|recruiter|scrum|program manager|tpm|engineering manager)\b/i.test(String(roleTitle || ''));
   const defaultRoster = [
-    { topic: 'HR', agentId: '01-hr-recruiter-screening.md', title: 'Round 1: Recruiter & Culture Screen' },
-    { topic: 'Technical', agentId: '03-technical-deep-dive-architecture.md', title: 'Round 2: Architecture & Core Stack Deep-Dive' },
-    { topic: 'Live Coding', agentId: '04-live-coding-anti-freeze-trainer.md', title: 'Round 3: Verbal Problem Solving & System Drill' },
-    { topic: 'Behavioral', agentId: '02-behavioral-leadership-star.md', title: 'Round 4: Leadership, Ownership & Product Impact' },
-    { topic: 'Negotiation', agentId: '06b-negotiation-eu-b2b-contracts.md', title: 'Round 5: Rate, Scope & Offer Close' }
+    { topic: 'HR', agentId: '01-hr-recruiter-screening.md', title: 'Round 1: Recruiter & Mandate Screen' },
+    { topic: 'Technical', agentId: '03-technical-deep-dive-architecture.md', title: isNonCode ? 'Round 2: Core Craft, Strategy & Metrics Deep-Dive' : 'Round 2: Architecture & Core Stack Deep-Dive' },
+    { topic: 'Live Coding', agentId: '04-live-coding-anti-freeze-trainer.md', title: isNonCode ? 'Round 3: Live Scenario & Case Drill' : 'Round 3: Verbal Problem Solving & System Drill' },
+    { topic: 'Behavioral', agentId: '02-behavioral-leadership-star.md', title: 'Round 4: Leadership, Ownership & Measurable Impact' },
+    { topic: 'Negotiation', agentId: '06b-negotiation-eu-b2b-contracts.md', title: 'Round 5: Scope, Leveling & Offer Close' }
   ];
   const validIds = new Set(AGENT_META.map((a) => a.id));
   const input = Array.isArray(rawRounds) && rawRounds.length >= 3 ? rawRounds.slice(0, 6) : defaultRoster;
@@ -481,7 +493,7 @@ export async function generateCustomInterviewPack(
     ? `${activeCv.profile.profilePrompt}\n\nFULL ACTIVE CV (${activeCv.filename}):\n${summarizeMdPrompt(activeCv.rawText, 2800)}`
     : summarizeMdPrompt(fullProfile, 3400);
 
-  const prompt = `You are a Principal Engineering Career Strategist preparing ${candidateName} for a specific target job.
+  const prompt = `You are an Executive & Principal Career Strategist preparing ${candidateName} for a target tech-company role (engineering, product, design, data, leadership, or C-suite).
 Analyze the Job Description against ${candidateName}'s verified profile and generate a COMPLETE, tailored Interview Series + Study Pack in English ONLY.
 
 CANDIDATE VERIFIED PROFILE:
