@@ -417,7 +417,7 @@ export function renderAvatarVisual(force = false) {
   const gender = inferVoiceGender(voiceKey);
   const appearance = state.lobbyCfg?.appearance || state.activeSession?.appearance || null;
   const quality = state.user?.avatarQuality === 'detailed' ? 'detailed' : 'standard';
-  const lobbyActive = !$('#view-lobby')?.classList.contains('inactive');
+  const lobbyActive = !$('#view-lobby')?.classList.contains('inactive') && Boolean($('#lobby-settings-dialog')?.open);
   const arenaActive = !$('#view-arena')?.classList.contains('inactive');
   const key = `${quality}:${meta.id}:${gender}:${appearance?.sig || 'base'}:${lobbyActive ? 1 : 0}${arenaActive ? 1 : 0}`;
 

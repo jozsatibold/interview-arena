@@ -384,6 +384,20 @@ export function syncVideoStreams() {
       el.setAttribute('aria-pressed', String(hasVideo));
     }
   }
+  const hasAudio = Boolean(state.mediaStream && state.micEnabled && state.mediaStream.getAudioTracks().some((t) => t.enabled));
+  const micBtnLobby = $('#btn-lobby-toggle-mic');
+  if (micBtnLobby) {
+    micBtnLobby.textContent = state.micEnabled ? '🎙️ Turn Mic Off' : '🔇 Turn Mic On';
+    micBtnLobby.setAttribute('aria-pressed', String(state.micEnabled));
+    micBtnLobby.classList.toggle('is-muted', !state.micEnabled);
+  }
+  const statusEl = $('#lobby-media-status');
+  if (statusEl && state.mediaStream) {
+    if (!state.micEnabled && !hasVideo) statusEl.textContent = 'Mic & Cam Off';
+    else if (!state.micEnabled) statusEl.textContent = 'Mic Muted · Cam Ready';
+    else if (!hasAudio) statusEl.textContent = 'No Live Mic';
+    else statusEl.textContent = hasVideo ? 'Camera & Mic Ready ✅' : 'Mic Ready (Cam Off)';
+  }
 }
 
 export function stopMicMeter() {
@@ -427,9 +441,9 @@ export function startMicMeter() {
         const v = Math.abs(data[i] - 128) / 128;
         if (v > peak) peak = v;
       }
-      reportUserMicLevel(peak);
-      reportVadSpeechSignal({ peak });
-      const pct = Math.min(100, Math.round(peak * 220));
+      reportUserMicLevel(state.micEnabled ? peak : 0);
+      reportVadSpeechSignal({ peak: state.micEnabled ? peak : 0 });
+      const pct = state.micEnabled ? Math.min(100, Math.round(peak * 220)) : 0;
       track.style.setProperty('--mic-pct', `${pct}%`);
       if (bar) bar.setAttribute('aria-valuenow', String(pct));
       state.micMeterRaf = requestAnimationFrame(loop);
@@ -493,6 +507,16 @@ export function toggleCamera() {
   }
   state.camEnabled = !state.camEnabled;
   for (const track of state.mediaStream.getVideoTracks()) track.enabled = state.camEnabled;
+  syncVideoStreams();
+}
+
+export function toggleMicrophone() {
+  state.micEnabled = !state.micEnabled;
+  if (state.mediaStream) {
+    for (const track of state.mediaStream.getAudioTracks()) track.enabled = state.micEnabled;
+  } else {
+    ensureMediaStream();
+  }
   syncVideoStreams();
 }
 
@@ -722,6 +746,13 @@ export function initSpeechRecognition(onSubmitTurn) {
     } else if (!micStarting) {
       micStarting = true;
       lastMicError = '';
+      if (!state.micEnabled) {
+        state.micEnabled = true;
+        if (state.mediaStream) {
+          for (const track of state.mediaStream.getAudioTracks()) track.enabled = true;
+        }
+        syncVideoStreams();
+      }
       if (!state.mediaStream?.getAudioTracks()?.some((t) => t.readyState === 'live') && navigator.mediaDevices?.getUserMedia) {
         try { state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
       }

@@ -1,7 +1,7 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
 import { getActiveAgentMeta, inferVoiceGender, rollAppearance, renderAvatarVisual } from './avatar.js';
-import { populateZonosVoiceDropdowns, stopAllSpeech, speakEnglish, ensureMediaStream, toggleCamera, stopMicMeter, stopMediaStream } from './voice-media.js';
+import { populateZonosVoiceDropdowns, stopAllSpeech, speakEnglish, ensureMediaStream, toggleCamera, toggleMicrophone, stopMicMeter, stopMediaStream } from './voice-media.js';
 
 export function formatSimpleMdToHtml(mdText) {
   const lines = String(mdText || '').split('\n');
@@ -254,8 +254,11 @@ export async function openLobby(cfg, switchToView) {
     $('#lobby-duration-select').value = String(state.user?.defaultDurationMinutes || 12);
   }
   $('#lobby-role-badge').textContent = `${meta.code} · ${meta.topic}`;
-  $('#lobby-voice-badge').textContent = `Voice: ${presetVoice}`;
+  if ($('#lobby-voice-badge')) $('#lobby-voice-badge').textContent = `Voice: ${presetVoice}`;
   $('#lobby-avatar-name').textContent = `${meta.avatarName} · ${meta.title}`;
+  if ($('#lobby-join-interviewer')) {
+    $('#lobby-join-interviewer').textContent = `With ${meta.avatarName} (${meta.title})`;
+  }
   $('#lobby-avatar-desc').textContent = `Unique persona & pre-assigned voice for "${cfg.title}"`;
   $('#lobby-stt-preview').textContent = 'Click Test Mic & say hello in English...';
 
@@ -274,13 +277,25 @@ export async function openLobby(cfg, switchToView) {
 
 export function wireLobbyEvents({ switchToView, onStartSession }) {
   $('#btn-lobby-back').addEventListener('click', () => {
+    $('#lobby-settings-dialog')?.close?.();
     stopLobbyMicTest();
     stopMediaStream();
     state.lobbyCfg = null;
     switchToView('view-path');
   });
 
-  $('#btn-lobby-toggle-cam').addEventListener('click', toggleCamera);
+  $('#btn-lobby-toggle-cam')?.addEventListener('click', toggleCamera);
+  $('#btn-lobby-toggle-mic')?.addEventListener('click', toggleMicrophone);
+
+  $('#btn-lobby-settings')?.addEventListener('click', () => {
+    const dlg = $('#lobby-settings-dialog');
+    if (!dlg) return;
+    dlg.showModal();
+    renderAvatarVisual(true);
+  });
+  $('#lobby-settings-dialog')?.addEventListener('close', () => {
+    renderAvatarVisual(true);
+  });
 
   $('#lobby-voice-select').addEventListener('change', (e) => {
     const v = e.target.value;
@@ -343,6 +358,7 @@ export function wireLobbyEvents({ switchToView, onStartSession }) {
   });
 
   $('#btn-join-call').addEventListener('click', async () => {
+    $('#lobby-settings-dialog')?.close?.();
     stopLobbyMicTest();
     stopMicMeter();
     const cfg = state.lobbyCfg || state.activeSession;

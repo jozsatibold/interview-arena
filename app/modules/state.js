@@ -23,6 +23,7 @@ export const state = {
   shieldInterval: null,
   mediaStream: null,
   camEnabled: true,
+  micEnabled: true,
   audioCtx: null,
   micMeterRaf: null,
   lobbyTestRec: null,

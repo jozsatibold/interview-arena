@@ -362,60 +362,24 @@
       </div>
     </section>
 
-    <!-- VIEW 1B: PRE-CALL LOBBY / GREEN ROOM -->
+    <!-- VIEW 1B: PRE-CALL LOBBY / GOOGLE MEET STYLE GREEN ROOM -->
     <section id="view-lobby" class="spa-view inactive" tabindex="-1" aria-hidden="true" inert aria-labelledby="heading-lobby">
       <div class="lobby-header">
         <div>
-          <span class="badge badge-green">🎧 Green Room · Device &amp; Voice Check</span>
+          <span class="badge badge-green">🎧 Green Room · Ready to Join</span>
           <h2 id="heading-lobby">Ready to Join Your Interview Call?</h2>
-          <p id="lobby-subtitle" class="muted">Test your camera, mic, and interviewer's ZONOS3 neural voice before stepping in.</p>
+          <p id="lobby-join-interviewer" class="muted">Check your camera &amp; mic, skim the role brief, and join when ready.</p>
         </div>
-        <int-button control-id="btn-lobby-back" variant="ghost" label="← Back to Path"></int-button>
+        <div class="lobby-header-actions">
+          <button type="button" id="btn-lobby-settings" class="btn btn-secondary lobby-settings-icon-btn" title="Interviewer, Personality &amp; Call Settings" aria-label="Open Interviewer and Call Settings">⚙️ Settings</button>
+          <int-button control-id="btn-lobby-back" variant="ghost" label="← Back to Path"></int-button>
+        </div>
       </div>
 
       <div class="lobby-grid">
-        <section class="card lobby-interviewer-card" aria-label="Interviewer Preview">
-          <div class="stage-top-bar">
-            <span id="lobby-role-badge" class="badge">HR Screening</span>
-            <span id="lobby-voice-badge" class="badge badge-green">Preset ZONOS3 Voice</span>
-          </div>
-
-          <div id="lobby-avatar-viewport" class="avatar-viewport lobby-avatar-box">
-            <div id="lobby-avatar-mount" class="avatar-mount"></div>
-          </div>
-
-          <div class="avatar-meta">
-            <strong id="lobby-avatar-name">Maya · Internal Fintech Talent Partner</strong>
-            <small id="lobby-avatar-desc" class="muted">Pre-configured unique voice &amp; persona</small>
-            <int-select control-id="lobby-voice-select" label="Interviewer Voice Preset" action-id="btn-lobby-test-voice" action-label="🔊 Hear Voice" action-variant="secondary"></int-select>
-            <int-select control-id="lobby-personality-select" label="🎲 Interviewer Personality (11 Moderate Traits)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll All" action-variant="ghost"></int-select>
-            <div id="lobby-personality-traits" class="lobby-trait-grid" aria-label="11 Interviewer Personality Dimensions (click a trait to adjust)"></div>
-            <p id="lobby-personality-tip" class="lobby-personality-tip muted"></p>
-            <div class="lobby-call-prefs">
-              <div class="field-group" style="margin:0;">
-                <label class="field-label" for="lobby-duration-select">⏱️ Target Call Length</label>
-                <select id="lobby-duration-select" class="full-input">
-                  <option value="8">8 min (Quick Screening)</option>
-                  <option value="12" selected>12 min (Standard + Reverse Q&amp;A)</option>
-                  <option value="15">15 min (Deep Dive)</option>
-                  <option value="25">25 min (Full Loop)</option>
-                </select>
-              </div>
-              <label class="voice-toggle" style="margin-top:0.35rem;">
-                <input type="checkbox" id="lobby-continuous-toggle" checked>
-                <span>💬 Continuous Conversation Mode (recommended for HR)</span>
-              </label>
-              <label class="voice-toggle" style="margin-top:0.2rem;">
-                <input type="checkbox" id="lobby-exam-toggle">
-                <span>🎯 Real Interview (Exam) Mode — hide live coach cards until end</span>
-              </label>
-            </div>
-          </div>
-        </section>
-
         <section class="card lobby-device-card" aria-label="Camera and Microphone Setup">
           <div class="card-head">
-            <h3>📷 Your Camera &amp; Microphone Check</h3>
+            <h3>📷 Camera &amp; Mic Preview</h3>
             <span id="lobby-media-status" class="badge">Checking devices...</span>
           </div>
 
@@ -426,12 +390,16 @@
               <span>Camera off / awaiting permission</span>
             </div>
             <span id="lobby-self-nameplate" class="pip-nameplate">You</span>
+            <div class="lobby-video-overlay-controls">
+              <button type="button" id="btn-lobby-toggle-mic" class="btn btn-dark-pill" aria-pressed="true">🎙️ Turn Mic Off</button>
+              <button type="button" id="btn-lobby-toggle-cam" class="btn btn-dark-pill" aria-pressed="true">📷 Turn Cam Off</button>
+            </div>
           </div>
 
           <div class="lobby-mic-box">
             <div class="mic-meter-header">
-              <span>🎙️ Mic Input Level</span>
-              <span id="lobby-stt-preview" class="muted">Click Test Mic &amp; say hello in English...</span>
+              <span>🎙️ Mic Input</span>
+              <span class="muted">Adjust voice, personality &amp; timer via ⚙️</span>
             </div>
             <div class="mic-meter-track" role="progressbar" aria-label="Microphone volume level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div id="lobby-mic-meter" class="mic-meter-fill"></div>
@@ -439,16 +407,17 @@
           </div>
 
           <div class="lobby-actions-row">
-            <int-button control-id="btn-lobby-toggle-cam" variant="ghost" label="📷 Camera On/Off"></int-button>
-            <int-button control-id="btn-lobby-test-mic" variant="mic" label="🎙️ Test Mic (English STT)"></int-button>
             <int-button control-id="btn-join-call" variant="green" btn-class="btn-join-call" label="📞 Join Interview Call ▶"></int-button>
           </div>
         </section>
-      </div>
 
-      <int-card heading="📋 Job Description &amp; Session Brief" heading-id="heading-lobby-jd" badge-id="lobby-jd-badge" badge-text="Target Role" card-class="lobby-jd-card">
-        <div id="lobby-jd-body" class="fake-job-body lobby-jd-body"></div>
-      </int-card>
+        <int-card heading="📋 Job Description &amp; Session Brief" heading-id="heading-lobby-jd" badge-id="lobby-jd-badge" badge-text="Target Role" card-class="lobby-jd-card">
+          <div class="lobby-jd-meta-row">
+            <span id="lobby-role-badge" class="badge">HR Screening</span>
+          </div>
+          <div id="lobby-jd-body" class="fake-job-body lobby-jd-body"></div>
+        </int-card>
+      </div>
     </section>
 
     <!-- VIEW 2: FULL-SCREEN REALISTIC VOICE/VIDEO CALL ARENA -->
@@ -1115,6 +1084,58 @@
       </form>
     </section>
   </main>
+
+  <!-- NATIVE MODAL DIALOG: LOBBY INTERVIEWER & SESSION SETTINGS -->
+  <dialog id="lobby-settings-dialog" closedby="any" aria-labelledby="lobby-settings-title">
+    <div class="dialog-header">
+      <h2 id="lobby-settings-title">⚙️ Interviewer, HR &amp; Call Settings</h2>
+      <button type="button" class="icon-close" command="close" commandfor="lobby-settings-dialog" aria-label="Close Lobby Settings">✕</button>
+    </div>
+    <div class="dialog-body lobby-settings-modal-body">
+      <div class="stage-top-bar">
+        <strong id="lobby-avatar-name">Maya · Internal Fintech Talent Partner</strong>
+        <span id="lobby-voice-badge" class="badge badge-green">Preset ZONOS3 Voice</span>
+      </div>
+      <small id="lobby-avatar-desc" class="muted">Pre-configured unique voice &amp; persona</small>
+
+      <div id="lobby-avatar-viewport" class="avatar-viewport lobby-avatar-box">
+        <div id="lobby-avatar-mount" class="avatar-mount"></div>
+      </div>
+
+      <int-select control-id="lobby-voice-select" label="Interviewer Voice Preset" action-id="btn-lobby-test-voice" action-label="🔊 Hear Voice" action-variant="secondary"></int-select>
+      <int-select control-id="lobby-personality-select" label="🎲 Interviewer Personality (11 Moderate Traits)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll All" action-variant="ghost"></int-select>
+      <div id="lobby-personality-traits" class="lobby-trait-grid" aria-label="11 Interviewer Personality Dimensions (click a trait to adjust)"></div>
+      <p id="lobby-personality-tip" class="lobby-personality-tip muted"></p>
+
+      <div class="lobby-call-prefs">
+        <div class="field-group" style="margin:0;">
+          <label class="field-label" for="lobby-duration-select">⏱️ Target Call Length</label>
+          <select id="lobby-duration-select" class="full-input">
+            <option value="8">8 min (Quick Screening)</option>
+            <option value="12" selected>12 min (Standard + Reverse Q&amp;A)</option>
+            <option value="15">15 min (Deep Dive)</option>
+            <option value="25">25 min (Full Loop)</option>
+          </select>
+        </div>
+        <label class="voice-toggle" style="margin-top:0.35rem;">
+          <input type="checkbox" id="lobby-continuous-toggle" checked>
+          <span>💬 Continuous Conversation Mode (recommended for HR)</span>
+        </label>
+        <label class="voice-toggle" style="margin-top:0.2rem;">
+          <input type="checkbox" id="lobby-exam-toggle">
+          <span>🎯 Real Interview (Exam) Mode — hide live coach cards until end</span>
+        </label>
+      </div>
+
+      <div class="lobby-stt-test-row">
+        <int-button control-id="btn-lobby-test-mic" variant="mic" label="🎙️ Test Mic (English STT)"></int-button>
+        <span id="lobby-stt-preview" class="muted">Click Test Mic &amp; say hello in English...</span>
+      </div>
+    </div>
+    <form method="dialog" class="dialog-footer">
+      <button type="submit" value="done" class="btn btn-primary">Done</button>
+    </form>
+  </dialog>
 
   <!-- NATIVE MODAL DIALOG: POWER-UP SHOP -->
   <dialog id="shop-dialog" closedby="any" aria-labelledby="shop-dialog-title">
