@@ -513,6 +513,12 @@ export const DEFAULT_STATE = {
   defaultAutoSpeak: true,
   defaultContinuousFlow: true,
   avatarQuality: 'standard',
+  defaultExamMode: false,
+  showCaptions: true,
+  callAmbientAudio: false,
+  micMode: 'manual',
+  defaultLayout: 'spotlight',
+  defaultDurationMinutes: 12,
   powerUps: {
     antiFreezeShield: 3,
     seniorHint: 4,

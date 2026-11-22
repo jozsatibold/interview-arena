@@ -4,7 +4,8 @@
  * live LLM-driven facial expressions, blinking, and hybrid audio/phoneme lip-sync.
  */
 
-import { EXPRESSION_PRESETS, getExpressionTargets } from '../../shared/expression.mjs';
+import { EXPRESSION_PRESETS } from '../../shared/expression.mjs';
+import { ensurePointerTracker, createAvatarMotionState } from './avatar-motion.js';
 import {
   drawRoundedRectPath,
   hexToRgba,
@@ -14,28 +15,9 @@ import {
   drawHairFrontAndAccessories
 } from './avatar-detailed-layers.js';
 
-export { getExpressionTargets };
+export { getExpressionTargets } from '../../shared/expression.mjs';
 
-const activeLoops = new WeakMap();
-
-let pointerTrackerInstalled = false;
-let pointerClientX = 0;
-let pointerClientY = 0;
-let pointerLastMovedMs = -Infinity;
-
-function ensurePointerTracker() {
-  if (pointerTrackerInstalled || typeof window === 'undefined') return;
-  pointerTrackerInstalled = true;
-  window.addEventListener(
-    'pointermove',
-    (e) => {
-      pointerClientX = e.clientX;
-      pointerClientY = e.clientY;
-      pointerLastMovedMs = performance.now();
-    },
-    { passive: true }
-  );
-}
+const activeLoops = new Map();
 
 function pickRand(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -63,7 +45,7 @@ export function rollDetailedDna(meta = {}, personality = null, gender = 'female'
   };
 }
 
-function drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, blinkAmount, viseme, exprState, lookX = 0, lookY = 0, eyeLookX = lookX, eyeLookY = lookY }) {
+function drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, gender, blinkAmount, viseme, exprState, lookX = 0, lookY = 0, eyeLookX = lookX, eyeLookY = lookY, prosodyBrowLift = 0 }) {
   const lipOpen = viseme?.open || 0;
   const lipWidth = viseme?.width || 0;
   const lipRound = viseme?.round || 0;
@@ -88,7 +70,7 @@ function drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, blin
     ctx.arc(ex - side * 2, ey, 10, side < 0 ? 1.1 : 4.2, side < 0 ? 4.8 : 1.9);
     ctx.stroke();
 
-    if (dna.earrings) {
+    if (dna.earrings && gender !== 'male') {
       ctx.fillStyle = '#fde68a';
       ctx.beginPath();
       ctx.arc(ex + side * 2, ey + 28, 5.5, 0, Math.PI * 2);
@@ -195,7 +177,7 @@ function drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, blin
   ctx.stroke();
 
   // Optional facial hair (stubble / trimmed beard) follows chin jaw drop
-  if (dna.facialHair !== 'none') {
+  if (gender === 'male' && dna.facialHair !== 'none') {
     const isFull = dna.facialHair === 'trimmed-beard';
     ctx.fillStyle = hexToRgba(palette.hairB || '#27272a', isFull ? 0.82 : 0.26);
     ctx.beginPath();
@@ -365,10 +347,10 @@ function drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, blin
       ctx.stroke();
     }
 
-    // Tapered sculptural eyebrow with asymmetric expression lift & tilt
+    // Tapered sculptural eyebrow with asymmetric expression lift, tilt & speaking prosody
     const baseBrowY = 194 + (dna.browHeight || 0);
     const sideRaise = side < 0 ? (es.browRaiseL || 0) : (es.browRaiseR || 0);
-    const browY = baseBrowY + sideRaise;
+    const browY = baseBrowY + sideRaise + prosodyBrowLift;
     const baseTilt = appearance?.browMood === 'focused' ? side * 3.5 : appearance?.browMood === 'flat' ? 0 : -2.5;
     const browTilt = baseTilt + side * (es.browSlant || 0);
     ctx.strokeStyle = palette.hairB || '#2c1c14';
@@ -399,6 +381,12 @@ export function renderDetailedAvatarFrame(canvas, opts) {
     eyeLookX = lookX,
     eyeLookY = lookY,
     blinkAmount = 0,
+    nodY = 0,
+    nodPitch = 0,
+    prosodyBrowLift = 0,
+    leanX = 0,
+    leanY = 0,
+    leanScale = 1,
     timeSec = 0
   } = opts;
 
@@ -430,14 +418,19 @@ export function renderDetailedAvatarFrame(canvas, opts) {
 
   const breathY = Math.sin(timeSec * 1.45) * 2.2;
   const speakTilt = mode === 'speaking' ? Math.sin(timeSec * 3.8) * 0.022 : 0;
-  const thinkTilt = mode === 'thinking' ? -0.045 : 0;
+  const thinkTilt = mode === 'thinking' ? -0.04 : 0;
   const idleTilt = Math.sin(timeSec * 0.8) * 0.012;
-  const headAngle = speakTilt + thinkTilt + idleTilt + (exprState?.headTiltBias || 0);
-  const headBobY = breathY * 0.65 + (mode === 'speaking' ? Math.sin(timeSec * 5.2) * 1.8 : 0);
+  const headAngle = speakTilt + thinkTilt + idleTilt + (exprState?.headTiltBias || 0) + nodPitch;
+  const headBobY = breathY * 0.65 + nodY + (mode === 'speaking' ? Math.sin(timeSec * 5.2) * 1.8 : 0);
 
   const hairGrad = ctx.createLinearGradient(170, 68, 390, 260);
   hairGrad.addColorStop(0, palette.hairA || '#4b3123');
   hairGrad.addColorStop(1, palette.hairB || '#22140c');
+
+  // Posture scale & lean pivot around bottom-center torso
+  ctx.translate(280 + leanX, 560 + leanY);
+  ctx.scale(leanScale, leanScale);
+  ctx.translate(-280, -560);
 
   // LAYER 1: Hanging back hair counter-shifts in 2.5D depth behind shoulders/neck
   ctx.save();
@@ -459,19 +452,23 @@ export function renderDetailedAvatarFrame(canvas, opts) {
   ctx.rotate(headAngle);
   ctx.translate(-280, -326);
 
-  drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, blinkAmount, viseme, exprState, lookX, lookY, eyeLookX, eyeLookY });
+  drawDetailedFaceAndFeatures(ctx, { appearance, palette, skin, dna, gender, blinkAmount, viseme, exprState, lookX, lookY, eyeLookX, eyeLookY, prosodyBrowLift });
   ctx.save();
   ctx.translate(lookX * 3.8, lookY * 2.5);
-  drawHairFrontAndAccessories(ctx, { meta, appearance, palette, style: hairStyle });
+  drawHairFrontAndAccessories(ctx, { meta, appearance, palette, style: hairStyle, dna });
   ctx.restore();
 
   ctx.restore();
   ctx.restore();
 }
 
-export function stopDetailedAvatarLoopsExcept(keepContainers = new Set()) {
-  // Handled per-canvas via mount checks in active animation ticks
-  return keepContainers;
+export function stopDetailedAvatarLoopsExcept(keepCanvases = new Set()) {
+  for (const [canvas, handle] of activeLoops.entries()) {
+    if (!keepCanvases.has(canvas)) {
+      handle.stop();
+    }
+  }
+  return keepCanvases;
 }
 
 /**
@@ -481,7 +478,7 @@ export function startDetailedAvatarLoop(canvas, stateGetter) {
   if (!canvas) return;
   ensurePointerTracker();
   const prev = activeLoops.get(canvas);
-  if (prev) cancelAnimationFrame(prev.rafId);
+  if (prev) prev.stop();
 
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const size = Math.round(560 * dpr);
@@ -490,125 +487,107 @@ export function startDetailedAvatarLoop(canvas, stateGetter) {
     canvas.height = size;
   }
 
-  let smoothedOpen = 0;
-  let smoothedWidth = 0;
-  let smoothedRound = 0;
-  let smoothedLookX = 0;
-  let smoothedLookY = 0;
-  let smoothedEyeX = 0;
-  let smoothedEyeY = 0;
-  let eyeVelX = 0;
-  let eyeVelY = 0;
-  let fixTargetX = 0;
-  let fixTargetY = 0;
-  let nextFixAt = performance.now() + 1800;
+  const stepMotion = createAvatarMotionState();
   let lastTickNow = performance.now();
-  const curExpr = { ...EXPRESSION_PRESETS.warm };
-  let nextBlinkAt = performance.now() + 1800 + Math.random() * 2500;
-  const handle = { rafId: 0 };
+  let cachedRect = null;
+  let cachedRectAt = -Infinity;
+  const reducedMotionMq = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-reduced-motion: reduce)') : null;
+  let stopped = false;
+
+  const handle = {
+    rafId: 0,
+    stop() {
+      stopped = true;
+      if (this.rafId) {
+        cancelAnimationFrame(this.rafId);
+        this.rafId = 0;
+      }
+      document.removeEventListener('visibilitychange', onVisibilityOrMotion);
+      window.removeEventListener('resize', invalidateRect);
+      reducedMotionMq?.removeEventListener?.('change', onVisibilityOrMotion);
+      activeLoops.delete(canvas);
+    }
+  };
+
+  function invalidateRect() {
+    cachedRectAt = -Infinity;
+  }
+
+  function isViewHiddenOrOff() {
+    if (document.hidden || !canvas.isConnected) return true;
+    if (canvas.closest('.spa-view.inactive')) return true;
+    if (canvas.closest('.no-avatar-mode')) return true;
+    return false;
+  }
+
+  function onVisibilityOrMotion() {
+    if (stopped) return;
+    if (!document.hidden && !handle.rafId) {
+      lastTickNow = performance.now();
+      handle.rafId = requestAnimationFrame(tick);
+    }
+  }
+
+  document.addEventListener('visibilitychange', onVisibilityOrMotion);
+  window.addEventListener('resize', invalidateRect, { passive: true });
+  reducedMotionMq?.addEventListener?.('change', onVisibilityOrMotion);
 
   const tick = (now) => {
-    if (!canvas.isConnected) {
-      activeLoops.delete(canvas);
+    handle.rafId = 0;
+    if (stopped || !canvas.isConnected) {
+      handle.stop();
+      return;
+    }
+    if (isViewHiddenOrOff()) {
       return;
     }
     const dt = Math.min(0.05, Math.max(0.004, (now - lastTickNow) / 1000));
     lastTickNow = now;
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = Boolean(reducedMotionMq?.matches);
     const st = stateGetter();
     const mode = st.getMode ? st.getMode() : 'idle';
+    const expression = st.getExpression ? st.getExpression() : 'warm';
     const targetViseme = st.getViseme ? st.getViseme(now) : { open: st.getLipLevel ? st.getLipLevel(now) : 0, width: 0, round: 0 };
-    const openAlpha = targetViseme.open > smoothedOpen ? 0.56 : 0.48;
-    smoothedOpen += (targetViseme.open - smoothedOpen) * openAlpha;
-    smoothedWidth += ((targetViseme.width || 0) - smoothedWidth) * 0.42;
-    smoothedRound += ((targetViseme.round || 0) - smoothedRound) * 0.42;
 
-    // Interpolate live LLM facial expression smoothly
-    const targetExpr = getExpressionTargets(st.getExpression ? st.getExpression() : 'warm');
-    for (const k of Object.keys(curExpr)) {
-      curExpr[k] += (targetExpr[k] - curExpr[k]) * (reducedMotion ? 1 : 0.08);
-    }
-
-    // Natural eye fixation + VOR eye-leads-head spring dynamics (smooth real gaze, zero abrupt snaps)
-    let rawTargetX = 0;
-    let rawTargetY = 0;
-    if (!reducedMotion) {
-      if (now - pointerLastMovedMs < 3200) {
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          const nx = (pointerClientX - (rect.left + rect.width * 0.5)) / Math.max(200, rect.width * 0.95);
-          const ny = (pointerClientY - (rect.top + rect.height * 0.42)) / Math.max(180, rect.height * 0.95);
-          rawTargetX = Math.tanh(nx) * 0.85;
-          rawTargetY = Math.tanh(ny) * 0.85;
+    const m = stepMotion({
+      now,
+      dt,
+      mode,
+      expression,
+      targetViseme,
+      reducedMotion,
+      getRect: () => {
+        if (!cachedRect || now - cachedRectAt > 250) {
+          cachedRect = canvas.getBoundingClientRect();
+          cachedRectAt = now;
         }
-      } else {
-        if (now >= nextFixAt) {
-          if (mode === 'thinking') {
-            fixTargetX = (Math.random() < 0.7 ? 1 : -1) * (0.28 + Math.random() * 0.24);
-            fixTargetY = -(0.22 + Math.random() * 0.22);
-            nextFixAt = now + 1100 + Math.random() * 1400;
-          } else if (Math.abs(fixTargetX) > 0.1 || Math.abs(fixTargetY) > 0.1) {
-            // Return smoothly to calm direct eye contact with tiny natural fixation offset
-            fixTargetX = (Math.random() - 0.5) * 0.08;
-            fixTargetY = (Math.random() - 0.5) * 0.06;
-            nextFixAt = now + 2200 + Math.random() * 2400;
-          } else {
-            // Occasional brief natural glance (e.g. caller camera tile bottom-right or slight think glance)
-            const towardCam = mode === 'listening' && Math.random() < 0.55;
-            fixTargetX = towardCam ? 0.26 + Math.random() * 0.12 : (Math.random() - 0.5) * 0.34;
-            fixTargetY = towardCam ? 0.16 + Math.random() * 0.08 : (Math.random() - 0.5) * 0.2;
-            nextFixAt = now + 900 + Math.random() * 1100;
-          }
-        }
-        // Subtle biological micro-drift during fixation so irises stay alive without sine swaying
-        const microDriftX = Math.sin(now * 0.0019) * 0.025 + Math.cos(now * 0.0031) * 0.015;
-        const microDriftY = Math.cos(now * 0.0017) * 0.02;
-        rawTargetX = fixTargetX + microDriftX;
-        rawTargetY = fixTargetY + microDriftY;
+        return cachedRect;
       }
-    }
-
-    // Critically damped spring for eyes (leads smoothly) + slower gentle follow for 2.5D head parallax
-    const omega = 13.5;
-    const damp = Math.exp(-omega * dt);
-    const fx = smoothedEyeX - rawTargetX;
-    const fy = smoothedEyeY - rawTargetY;
-    const tx = (eyeVelX + omega * fx) * dt;
-    const ty = (eyeVelY + omega * fy) * dt;
-    eyeVelX = (eyeVelX - omega * tx) * damp;
-    eyeVelY = (eyeVelY - omega * ty) * damp;
-    smoothedEyeX = rawTargetX + (fx + tx) * damp;
-    smoothedEyeY = rawTargetY + (fy + ty) * damp;
-
-    const headFollow = 1 - Math.exp(-3.4 * dt);
-    smoothedLookX += (smoothedEyeX * 0.72 - smoothedLookX) * headFollow;
-    smoothedLookY += (smoothedEyeY * 0.72 - smoothedLookY) * headFollow;
-
-    let blinkAmount = 0;
-    if (!reducedMotion) {
-      const elapsed = now - nextBlinkAt;
-      if (elapsed >= 0 && elapsed < 170) {
-        blinkAmount = Math.sin((elapsed / 170) * Math.PI);
-      } else if (elapsed >= 170) {
-        nextBlinkAt = now + 2600 + Math.random() * 3400;
-      }
-    }
+    });
 
     renderDetailedAvatarFrame(canvas, {
       meta: st.meta,
       gender: st.gender,
       appearance: st.appearance,
       mode,
-      viseme: { open: smoothedOpen, width: smoothedWidth, round: smoothedRound },
-      exprState: curExpr,
-      lookX: smoothedLookX,
-      lookY: smoothedLookY,
-      eyeLookX: smoothedEyeX,
-      eyeLookY: smoothedEyeY,
-      blinkAmount,
-      timeSec: reducedMotion ? 0 : now * 0.001
+      viseme: m.viseme,
+      exprState: m.exprState,
+      lookX: m.lookX,
+      lookY: m.lookY,
+      eyeLookX: m.eyeLookX,
+      eyeLookY: m.eyeLookY,
+      blinkAmount: m.blinkAmount,
+      nodY: m.nodY,
+      nodPitch: m.nodPitch,
+      prosodyBrowLift: m.prosodyBrowLift,
+      leanX: m.leanX,
+      leanY: m.leanY,
+      leanScale: m.leanScale,
+      timeSec: m.timeSec
     });
-    handle.rafId = requestAnimationFrame(tick);
+    if (!reducedMotion && !stopped) {
+      handle.rafId = requestAnimationFrame(tick);
+    }
   };
 
   handle.rafId = requestAnimationFrame(tick);

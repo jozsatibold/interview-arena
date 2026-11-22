@@ -2,18 +2,26 @@ import { esc, fillSelectOptions } from '../components.js';
 import { normalizeInterviewTranscript } from '../../shared/transcript.mjs';
 import { buildVisemeTimeline, sampleVisemeTimeline } from '../../shared/viseme.mjs';
 import { $, state } from './state.js';
-import { getAvatarMode, setAvatarState } from './avatar.js';
+import { getAvatarMode, getActiveAgentMeta, setAvatarState } from './avatar.js';
+import { reportUserMicLevel, pulseUserSpeechActivity } from './avatar-motion.js';
+import { awaitBackchannelDone, stopActiveBackchannel } from './call-audio.js';
+import { onMicListeningStarted, onMicListeningEnded, reportVadSpeechSignal, notifyInterviewerSpeechFinished, wireVadKeyboardControls } from './call-vad.js';
+import { updateLiveCaption } from './call-ui.js';
 
 let currentAudio = null;
+let activeAudioCancel = null;
+let activeUtterance = null;
 let speakSeqId = 0;
+let activeDrainSeq = 0;
 const ttsAbortControllers = new Set();
 let ttsQueue = [];
-let ttsPlaying = false;
 let lipCtx = null;
 let lipAnalyser = null;
 let lipData = null;
 let lipTimeData = null;
 let lipAnalyserReadyForEl = false;
+let micMeterSrc = null;
+let micMeterAnalyser = null;
 
 let activeSpokenText = '';
 let activeTimeline = [];
@@ -104,12 +112,11 @@ export function getSpeechLipLevel(timeMs = performance.now()) {
   return getSpeechViseme(timeMs).open;
 }
 
-function attachLipAnalyser(audioEl) {
+async function attachLipAnalyser(audioEl) {
   lipAnalyserReadyForEl = false;
-  if ((state.user?.avatarQuality || 'standard') !== 'detailed') return;
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
+    if (!AudioCtx) return null;
     if (!lipCtx) {
       lipCtx = new AudioCtx();
       lipAnalyser = lipCtx.createAnalyser();
@@ -119,12 +126,17 @@ function attachLipAnalyser(audioEl) {
       lipTimeData = new Uint8Array(lipAnalyser.fftSize);
       lipAnalyser.connect(lipCtx.destination);
     }
-    if (lipCtx.state === 'suspended') lipCtx.resume().catch(() => {});
+    if (lipCtx.state === 'suspended') {
+      await lipCtx.resume().catch(() => {});
+    }
+    if (lipCtx.state !== 'running') return null;
     const src = lipCtx.createMediaElementSource(audioEl);
     src.connect(lipAnalyser);
     lipAnalyserReadyForEl = true;
+    return src;
   } catch {
     lipAnalyserReadyForEl = false;
+    return null;
   }
 }
 
@@ -160,15 +172,21 @@ export function populateZonosVoiceDropdowns() {
 export function stopAllSpeech() {
   speakSeqId += 1;
   ttsQueue = [];
-  ttsPlaying = false;
+  activeDrainSeq = 0;
+  stopActiveBackchannel();
   activeSpokenText = '';
   activeTimeline = [];
   activeBoundaryChar = 0;
+  activeUtterance = null;
   for (const ac of ttsAbortControllers) {
     try { ac.abort(); } catch {}
   }
   ttsAbortControllers.clear();
-  if (currentAudio) {
+  if (activeAudioCancel) {
+    const cancel = activeAudioCancel;
+    activeAudioCancel = null;
+    cancel();
+  } else if (currentAudio) {
     try {
       currentAudio.pause();
       currentAudio.currentTime = 0;
@@ -206,8 +224,9 @@ function fetchTtsAudioPromise(text, voice, mySeq) {
       if (res.ok && ct.startsWith('audio/')) return { blob: await res.blob(), zonos: true };
       return { fallback: true };
     })
-    .catch(() => {
+    .catch((err) => {
       ttsAbortControllers.delete(ac);
+      if (err?.name === 'AbortError' || mySeq !== speakSeqId) return { cancelled: true };
       return { fallback: true };
     });
 }
@@ -217,15 +236,32 @@ function playSingleUtteranceFallback(text, mySeq) {
     if (!('speechSynthesis' in window) || mySeq !== speakSeqId) return resolve();
     window.speechSynthesis.cancel();
     const utt = new SpeechSynthesisUtterance(text);
+    activeUtterance = utt;
     const wanted = state.user?.preferredVoice || $('#voice-select')?.value;
     const picked = getEnglishVoices().find((v) => v.name === wanted) || getEnglishVoices()[0];
     if (picked) utt.voice = picked;
     utt.lang = 'en-US';
     utt.rate = 1.0;
+    let settled = false;
+    let startedAt = 0;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
+      if (startedAt && state.activeSession?.metrics) {
+        state.activeSession.metrics.aiSpeakMs += Math.max(0, performance.now() - startedAt);
+      }
+      if (activeUtterance === utt) activeUtterance = null;
+      resolve();
+    };
+    const safetyTimer = setTimeout(finish, Math.max(8000, text.length * 140));
     utt.onstart = () => {
       if (mySeq === speakSeqId) {
+        startedAt = performance.now();
         beginUtteranceVisemeTrack(text);
         setAvatarState('speaking', 'browser');
+        const speakerName = state.activeSession?.tutorTeacher?.name || getActiveAgentMeta(state.activeSession?.agentFile)?.avatarName || 'Interviewer';
+        updateLiveCaption(speakerName, text);
       }
     };
     utt.onboundary = (e) => {
@@ -234,57 +270,86 @@ function playSingleUtteranceFallback(text, mySeq) {
         activeBoundaryMs = performance.now();
       }
     };
-    utt.onend = resolve;
-    utt.onerror = resolve;
+    utt.onend = finish;
+    utt.onerror = finish;
     window.speechSynthesis.speak(utt);
   });
 }
 
 async function drainTtsQueue() {
-  if (ttsPlaying) return;
-  ttsPlaying = true;
   const mySeq = speakSeqId;
+  if (activeDrainSeq === mySeq) return;
+  activeDrainSeq = mySeq;
 
+  await awaitBackchannelDone();
+  let spokeInQueue = false;
   while (ttsQueue.length > 0 && mySeq === speakSeqId) {
     const item = ttsQueue.shift();
     const res = await item.audioPromise;
     if (mySeq !== speakSeqId || res.cancelled) break;
 
     if (res.blob) {
+      spokeInQueue = true;
       await new Promise((resolve) => {
         const url = URL.createObjectURL(res.blob);
         const audio = new Audio(url);
         currentAudio = audio;
         beginUtteranceVisemeTrack(item.text);
-        attachLipAnalyser(audio);
+        let sourceNode = null;
+        let done = false;
+        let playStartedAt = 0;
         const cleanup = () => {
+          if (done) return;
+          done = true;
+          if (playStartedAt && state.activeSession?.metrics) {
+            state.activeSession.metrics.aiSpeakMs += Math.max(0, performance.now() - playStartedAt);
+          }
+          if (activeAudioCancel === cleanup) activeAudioCancel = null;
+          try { audio.pause(); audio.currentTime = 0; } catch {}
+          try { sourceNode?.disconnect(); } catch {}
           URL.revokeObjectURL(url);
           if (currentAudio === audio) currentAudio = null;
+          lipAnalyserReadyForEl = false;
           resolve();
         };
+        activeAudioCancel = cleanup;
         audio.addEventListener('playing', () => {
           if (mySeq === speakSeqId) {
-            activeSpeechStartMs = performance.now();
+            playStartedAt = performance.now();
+            activeSpeechStartMs = playStartedAt;
             setAvatarState('speaking', 'zonos');
+            const speakerName = state.activeSession?.tutorTeacher?.name || getActiveAgentMeta(state.activeSession?.agentFile)?.avatarName || 'Interviewer';
+            updateLiveCaption(speakerName, item.text);
           }
         }, { once: true });
         audio.addEventListener('ended', cleanup, { once: true });
         audio.addEventListener('error', cleanup, { once: true });
-        setAvatarState('speaking', 'zonos');
-        audio.play().catch(cleanup);
+        attachLipAnalyser(audio).then((src) => {
+          if (done) {
+            try { src?.disconnect(); } catch {}
+            return;
+          }
+          sourceNode = src;
+          setAvatarState('speaking', 'zonos');
+          audio.play().catch(cleanup);
+        });
       });
     } else if (res.fallback) {
+      spokeInQueue = true;
       await playSingleUtteranceFallback(item.text, mySeq);
     }
   }
 
-  ttsPlaying = false;
+  if (activeDrainSeq === mySeq) activeDrainSeq = 0;
   if (mySeq === speakSeqId && ttsQueue.length === 0) {
     setAvatarState(state.isListening ? 'listening' : 'idle');
+    if (spokeInQueue) {
+      notifyInterviewerSpeechFinished({ canAutoListen: Boolean(state.activeSession && $('#auto-speak-toggle')?.checked) });
+    }
   }
 }
 
-export function enqueueSpeakSentence(sentence, { reset = false, force = false } = {}) {
+export function enqueueSpeakSentence(sentence, { reset = false, force = false, voice = '' } = {}) {
   const clean = String(sentence || '').trim();
   if (!clean || (!force && !$('#auto-speak-toggle')?.checked)) return;
   if (state.isListening && state.recognition) {
@@ -293,13 +358,13 @@ export function enqueueSpeakSentence(sentence, { reset = false, force = false } 
   }
   if (reset) stopAllSpeech();
   const mySeq = speakSeqId;
-  const voice = state.activeSession?.voice || $('#arena-voice-select')?.value || state.user?.zonosVoice || 'AmericanFemale';
-  ttsQueue.push({ text: clean, audioPromise: fetchTtsAudioPromise(clean, voice, mySeq) });
+  const chosenVoice = voice || state.activeSession?.voice || $('#arena-voice-select')?.value || state.user?.zonosVoice || 'AmericanFemale';
+  ttsQueue.push({ text: clean, audioPromise: fetchTtsAudioPromise(clean, chosenVoice, mySeq) });
   drainTtsQueue();
 }
 
-export async function speakEnglish(text, { force = false } = {}) {
-  enqueueSpeakSentence(text, { reset: true, force });
+export async function speakEnglish(text, { force = false, voice = '' } = {}) {
+  enqueueSpeakSentence(text, { reset: true, force, voice });
 }
 
 export function syncVideoStreams() {
@@ -311,8 +376,14 @@ export function syncVideoStreams() {
     vid.srcObject = hasVideo ? state.mediaStream : null;
     if (fb) fb.hidden = hasVideo;
   }
-  if ($('#btn-toggle-cam')) $('#btn-toggle-cam').textContent = hasVideo ? '📷 Cam Off' : '📷 Cam On';
-  if ($('#btn-lobby-toggle-cam')) $('#btn-lobby-toggle-cam').textContent = hasVideo ? '📷 Cam On' : '📷 Cam Off';
+  const label = hasVideo ? '📷 Turn Cam Off' : '📷 Turn Cam On';
+  for (const id of ['#btn-toggle-cam', '#btn-lobby-toggle-cam']) {
+    const el = $(id);
+    if (el) {
+      el.textContent = label;
+      el.setAttribute('aria-pressed', String(hasVideo));
+    }
+  }
 }
 
 export function stopMicMeter() {
@@ -320,21 +391,33 @@ export function stopMicMeter() {
     cancelAnimationFrame(state.micMeterRaf);
     state.micMeterRaf = null;
   }
-  if ($('#lobby-mic-meter')) $('#lobby-mic-meter').style.setProperty('--mic-pct', '0%');
+  try { micMeterSrc?.disconnect(); } catch {}
+  try { micMeterAnalyser?.disconnect(); } catch {}
+  micMeterSrc = null;
+  micMeterAnalyser = null;
+  const meter = $('#lobby-mic-meter');
+  if (meter) {
+    meter.style.setProperty('--mic-pct', '0%');
+    meter.closest('[role="progressbar"]')?.setAttribute('aria-valuenow', '0');
+  }
 }
 
 export function startMicMeter() {
   stopMicMeter();
-  if (!state.mediaStream || !state.mediaStream.getAudioTracks().length) return;
+  if (!state.mediaStream || !state.mediaStream.getAudioTracks().some((t) => t.readyState === 'live')) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!state.audioCtx) state.audioCtx = new Ctx();
+    if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
     const src = state.audioCtx.createMediaStreamSource(state.mediaStream);
     const analyser = state.audioCtx.createAnalyser();
     analyser.fftSize = 256;
     src.connect(analyser);
+    micMeterSrc = src;
+    micMeterAnalyser = analyser;
     const data = new Uint8Array(analyser.frequencyBinCount);
     const track = $('#lobby-mic-meter');
+    const bar = track?.closest('[role="progressbar"]');
 
     const loop = () => {
       if (!state.mediaStream || !track) return;
@@ -344,7 +427,11 @@ export function startMicMeter() {
         const v = Math.abs(data[i] - 128) / 128;
         if (v > peak) peak = v;
       }
-      track.style.setProperty('--mic-pct', `${Math.min(100, Math.round(peak * 220))}%`);
+      reportUserMicLevel(peak);
+      reportVadSpeechSignal({ peak });
+      const pct = Math.min(100, Math.round(peak * 220));
+      track.style.setProperty('--mic-pct', `${pct}%`);
+      if (bar) bar.setAttribute('aria-valuenow', String(pct));
       state.micMeterRaf = requestAnimationFrame(loop);
     };
     loop();
@@ -352,7 +439,8 @@ export function startMicMeter() {
 }
 
 export async function ensureMediaStream() {
-  if (state.mediaStream) {
+  const hasLiveAudio = state.mediaStream?.getAudioTracks?.().some((t) => t.readyState === 'live');
+  if (state.mediaStream && hasLiveAudio) {
     syncVideoStreams();
     startMicMeter();
     return state.mediaStream;
@@ -376,13 +464,25 @@ export async function ensureMediaStream() {
     startMicMeter();
     return state.mediaStream;
   } catch {
-    state.camEnabled = false;
-    if ($('#lobby-media-status')) {
-      $('#lobby-media-status').textContent = 'Camera off (voice/text ready)';
-      $('#lobby-media-status').className = 'badge';
+    try {
+      state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      state.camEnabled = false;
+      if ($('#lobby-media-status')) {
+        $('#lobby-media-status').textContent = 'Mic Ready (Camera off)';
+        $('#lobby-media-status').className = 'badge badge-green';
+      }
+      syncVideoStreams();
+      startMicMeter();
+      return state.mediaStream;
+    } catch {
+      state.camEnabled = false;
+      if ($('#lobby-media-status')) {
+        $('#lobby-media-status').textContent = 'Camera off (voice/text ready)';
+        $('#lobby-media-status').className = 'badge';
+      }
+      syncVideoStreams();
+      return null;
     }
-    syncVideoStreams();
-    return null;
   }
 }
 
@@ -442,12 +542,19 @@ export function initSpeechRecognition(onSubmitTurn) {
   let mediaRec = null;
   let audioChunks = [];
   let audioStopPromise = null;
+  let micStarting = false;
+  let lastMicError = '';
+  let micTurnStartedAt = 0;
 
   const startLocalAudioRecorder = () => {
+    if (mediaRec && mediaRec.state !== 'inactive') {
+      try { mediaRec.stop(); } catch {}
+    }
+    mediaRec = null;
     audioChunks = [];
     audioStopPromise = null;
     if (!state.mediaStream || typeof MediaRecorder === 'undefined') return;
-    const audioTracks = state.mediaStream.getAudioTracks();
+    const audioTracks = state.mediaStream.getAudioTracks().filter((t) => t.readyState === 'live');
     if (!audioTracks.length) return;
     try {
       const mr = new MediaRecorder(new MediaStream(audioTracks));
@@ -475,7 +582,14 @@ export function initSpeechRecognition(onSubmitTurn) {
   };
 
   rec.onstart = () => {
+    const interruptedSpeaker = getAvatarMode() === 'speaking';
+    if (interruptedSpeaker && state.activeSession) {
+      state.activeSession.lastTurnInterrupted = true;
+    }
     stopAllSpeech();
+    micStarting = false;
+    micTurnStartedAt = performance.now();
+    lastMicError = '';
     state.isListening = true;
     state.pendingSendOnMicStop = false;
     committed = $('#answer-input').value ? $('#answer-input').value + ' ' : '';
@@ -487,6 +601,7 @@ export function initSpeechRecognition(onSubmitTurn) {
     if ($('#live-stt-bar')) $('#live-stt-bar').hidden = false;
     if ($('#live-stt-text')) $('#live-stt-text').textContent = committed.trim() || 'Listening to your English...';
     setAvatarState('listening');
+    onMicListeningStarted();
     startLocalAudioRecorder();
 
     fetch('/api/warmup', {
@@ -503,25 +618,41 @@ export function initSpeechRecognition(onSubmitTurn) {
       if (event.results[i].isFinal) committed += t + ' ';
       else interim += t;
     }
-    const combined = normalizeInterviewTranscript((committed + interim).trim());
+    const mode = state.activeSession?.mode || 'interview';
+    const combined = normalizeInterviewTranscript((committed + interim).trim(), { mode });
+    pulseUserSpeechActivity();
+    reportVadSpeechSignal({ transcriptText: combined });
+    updateLiveCaption('You', combined);
     $('#answer-input').value = combined;
     if ($('#live-stt-text')) $('#live-stt-text').textContent = combined || 'Listening...';
     upsertLiveDraftBubble(combined);
   };
 
   rec.onerror = (ev) => {
+    micStarting = false;
     state.pendingSendOnMicStop = false;
-    $('#mic-status').textContent = `Mic error: ${ev.error}`;
+    onMicListeningEnded();
+    lastMicError = `Mic error: ${ev.error}`;
+    $('#mic-status').textContent = lastMicError;
   };
 
   rec.onend = async () => {
+    micStarting = false;
     state.isListening = false;
+    onMicListeningEnded();
+    if (micTurnStartedAt > 0 && state.activeSession?.metrics) {
+      const dur = Math.max(0, performance.now() - micTurnStartedAt);
+      state.activeSession.metrics.userSpeakMs += dur;
+      if (dur >= 800) state.activeSession.metrics.turnDurationsMs.push(dur);
+    }
+    micTurnStartedAt = 0;
     micBtn.classList.remove('is-listening');
     micBtn.textContent = '🎙️ Speak English';
     if ($('#live-stt-bar')) $('#live-stt-bar').hidden = true;
     upsertLiveDraftBubble('');
 
-    const fallbackText = normalizeInterviewTranscript($('#answer-input').value.trim());
+    const mode = state.activeSession?.mode || 'interview';
+    const fallbackText = normalizeInterviewTranscript($('#answer-input').value.trim(), { mode });
     const shouldSend = state.pendingSendOnMicStop;
     state.pendingSendOnMicStop = false;
 
@@ -547,7 +678,9 @@ export function initSpeechRecognition(onSubmitTurn) {
       $('#answer-input').value = '';
       $('#mic-status').textContent = '⚡ Responding immediately (Whisper refining in background)...';
       const fastTurnRef = {};
-      onSubmitTurn('turn', fallbackText, fastTurnRef);
+      Promise.resolve(onSubmitTurn('turn', fallbackText, fastTurnRef)).finally(() => {
+        if (!state.isListening) $('#mic-status').textContent = 'Ready — click Speak or type in English.';
+      });
       stopLocalAudioRecorder().then((blob) => refineRecordingWithWhisper(blob, fastTurnRef));
       return;
     }
@@ -563,24 +696,41 @@ export function initSpeechRecognition(onSubmitTurn) {
     if (shouldSend && finalText) {
       $('#answer-input').value = '';
       $('#mic-status').textContent = 'Sending your English answer...';
-      onSubmitTurn('turn', finalText);
+      Promise.resolve(onSubmitTurn('turn', finalText)).finally(() => {
+        if (!state.isListening) $('#mic-status').textContent = 'Ready — click Speak or type in English.';
+      });
       return;
     }
     if (finalText) $('#answer-input').value = finalText;
-    $('#mic-status').textContent = 'Ready — click Speak or type in English.';
+    $('#mic-status').textContent = lastMicError || 'Ready — click Speak or type in English.';
     if (getAvatarMode() === 'listening') setAvatarState('idle');
   };
 
   state.recognition = rec;
+  wireVadKeyboardControls({
+    onBargeIn: () => {
+      if (getAvatarMode() === 'speaking') {
+        if (state.activeSession) state.activeSession.lastTurnInterrupted = true;
+        stopAllSpeech();
+      }
+    }
+  });
   micBtn.addEventListener('click', async () => {
     if (state.isListening) {
       state.pendingSendOnMicStop = true;
-      rec.stop();
-    } else {
-      if (!state.mediaStream?.getAudioTracks()?.length && navigator.mediaDevices?.getUserMedia) {
+      try { rec.stop(); } catch {}
+    } else if (!micStarting) {
+      micStarting = true;
+      lastMicError = '';
+      if (!state.mediaStream?.getAudioTracks()?.some((t) => t.readyState === 'live') && navigator.mediaDevices?.getUserMedia) {
         try { state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
       }
-      rec.start();
+      try {
+        rec.start();
+      } catch (err) {
+        micStarting = false;
+        $('#mic-status').textContent = `Mic error: ${err?.message || 'busy'}`;
+      }
     }
   });
 }

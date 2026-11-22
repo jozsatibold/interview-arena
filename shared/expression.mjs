@@ -15,5 +15,6 @@ export function normalizeExpression(raw) {
 }
 
 export function getExpressionTargets(expression = 'warm') {
-  return EXPRESSION_PRESETS[expression] || EXPRESSION_PRESETS.warm;
+  const key = String(expression || '').trim().toLowerCase();
+  return Object.hasOwn(EXPRESSION_PRESETS, key) ? EXPRESSION_PRESETS[key] : EXPRESSION_PRESETS.warm;
 }

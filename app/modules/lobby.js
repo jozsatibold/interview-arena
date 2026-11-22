@@ -1,6 +1,6 @@
 import { esc, fillSelectOptions } from '../components.js';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
-import { getActiveAgentMeta, rollAppearance, renderAvatarVisual } from './avatar.js';
+import { getActiveAgentMeta, inferVoiceGender, rollAppearance, renderAvatarVisual } from './avatar.js';
 import { populateZonosVoiceDropdowns, stopAllSpeech, speakEnglish, ensureMediaStream, toggleCamera, stopMicMeter, stopMediaStream } from './voice-media.js';
 
 export function formatSimpleMdToHtml(mdText) {
@@ -188,8 +188,7 @@ export function applyLobbyPersonality(personality) {
   if (!personality) return;
   const meta = getActiveAgentMeta(state.lobbyCfg?.agentFile || state.activeSession?.agentFile);
   const voiceKey = state.lobbyCfg?.voice || meta.defaultVoice;
-  const engine = state.user?.ttsEngine || $('#tts-engine-select')?.value || 'auto';
-  const gender = engine !== 'browser' && /male/i.test(voiceKey) && !/female/i.test(voiceKey) ? 'male' : (meta.gender || 'female');
+  const gender = inferVoiceGender(voiceKey);
   const appearance = rollAppearance(meta, personality, gender);
   if (state.lobbyCfg) {
     state.lobbyCfg.personality = personality;
@@ -248,6 +247,12 @@ export async function openLobby(cfg, switchToView) {
   if ($('#lobby-continuous-toggle')) {
     $('#lobby-continuous-toggle').checked = topic === 'HR' ? true : state.user?.defaultContinuousFlow !== false;
   }
+  if ($('#lobby-exam-toggle')) {
+    $('#lobby-exam-toggle').checked = Boolean(state.user?.defaultExamMode);
+  }
+  if ($('#lobby-duration-select')) {
+    $('#lobby-duration-select').value = String(state.user?.defaultDurationMinutes || 12);
+  }
   $('#lobby-role-badge').textContent = `${meta.code} · ${meta.topic}`;
   $('#lobby-voice-badge').textContent = `Voice: ${presetVoice}`;
   $('#lobby-avatar-name').textContent = `${meta.avatarName} · ${meta.title}`;
@@ -303,8 +308,10 @@ export function wireLobbyEvents({ switchToView, onStartSession }) {
   $('#btn-lobby-test-voice').addEventListener('click', () => {
     const meta = getActiveAgentMeta(state.lobbyCfg?.agentFile);
     const { firstName } = getCandidateIdentity();
-    state.activeSession.voice = $('#lobby-voice-select').value;
-    speakEnglish(`Hi ${firstName}! I'm ${meta.avatarName}, looking forward to our chat today.`, { force: true });
+    speakEnglish(`Hi ${firstName}! I'm ${meta.avatarName}, looking forward to our chat today.`, {
+      force: true,
+      voice: $('#lobby-voice-select')?.value || meta.defaultVoice
+    });
   });
 
   $('#btn-lobby-test-mic').addEventListener('click', () => {
@@ -341,7 +348,9 @@ export function wireLobbyEvents({ switchToView, onStartSession }) {
     const cfg = state.lobbyCfg || state.activeSession;
     const chosenVoice = $('#lobby-voice-select')?.value || cfg.voice || 'AmericanFemale';
     const continuous = $('#lobby-continuous-toggle')?.checked ?? (cfg.topic === 'HR');
+    const examMode = Boolean($('#lobby-exam-toggle')?.checked);
+    const durationMinutes = Number($('#lobby-duration-select')?.value || state.user?.defaultDurationMinutes || 12);
     state.lobbyCfg = null;
-    await onStartSession({ ...cfg, voice: chosenVoice, continuous });
+    await onStartSession({ ...cfg, voice: chosenVoice, continuous, examMode, durationMinutes });
   });
 }

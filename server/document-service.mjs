@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -16,7 +18,7 @@ import {
 } from '../role-adapter.mjs';
 import {
   ROOT_DIR,
-  OLLAMA_BASE,
+  DATA_DIR,
   AGENT_META,
   MORNING_PATH,
   COMPACT_CANDIDATE_PROFILE
@@ -26,14 +28,13 @@ import {
   getActiveCv,
   insertAndActivateCvSync,
   updateCvGeneratedJdsSync,
-  ensureCustomInterviews,
-  saveCustomInterviews
+  upsertCustomInterviewSync
 } from './db.mjs';
 import {
   fetchOllamaChat,
   consumeNdjsonBody,
   stripThinkBlocks,
-  extractJsonSafe,
+  parseJsonObjectStrict,
   pickRecommendedPlannerModels,
   pickVisionModels,
   estimateModelDurationSec,
@@ -69,6 +70,8 @@ async function resolveAnalyzerModel(explicitModel = '') {
 }
 
 export async function extractPdfWithMacOs(pdfPath) {
+  const swiftCache = path.join(DATA_DIR, 'swift-cache');
+  await fs.mkdir(swiftCache, { recursive: true });
   const { stdout } = await execFileAsync(
     '/usr/bin/swift',
     [
@@ -79,8 +82,8 @@ export async function extractPdfWithMacOs(pdfPath) {
     {
       env: {
         ...process.env,
-        CLANG_MODULE_CACHE_PATH: '/tmp/swift-cache',
-        SWIFT_MODULE_CACHE_PATH: '/tmp/swift-cache'
+        CLANG_MODULE_CACHE_PATH: swiftCache,
+        SWIFT_MODULE_CACHE_PATH: swiftCache
       },
       timeout: 25000,
       maxBuffer: 8 * 1024 * 1024
@@ -104,22 +107,19 @@ export async function extractTextFromImage({ imageBase64, visionModel, kind = 'j
       ? 'Extract ALL text verbatim from this CV / resume image cleanly in Markdown/plain text. Preserve name, contact/location, experience dates, companies, metrics, tech stack, and education.'
       : 'Extract ALL text verbatim from this job description screenshot cleanly in plain text/Markdown. Preserve company name, role title, stack/requirements, responsibilities, and compensation/location if visible. Return only the extracted job description text.';
 
-  const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const res = await fetchOllamaChat(
+    {
       model: chosenModel,
       keep_alive: '5m',
       stream: false,
       options: { temperature: 0.1 },
       messages: [{ role: 'user', content: promptText, images: [cleanB64] }]
-    }),
-    signal: AbortSignal.timeout(90000)
-  });
-  if (!res.ok) throw new Error(`Vision OCR error (${res.status}): ${await res.text()}`);
+    },
+    90000
+  );
   const data = await res.json();
   return {
-    extractedText: String(data?.message?.content || '').trim(),
+    extractedText: stripThinkBlocks(data?.message?.content || '').trim(),
     modelUsed: chosenModel
   };
 }
@@ -143,25 +143,28 @@ export async function extractDocumentText({ filename = 'cv.txt', base64Data = ''
     const res = await extractTextFromImage({ imageBase64: rawB64, visionModel, kind: 'cv' });
     return [cleanPaste, res.extractedText].filter(Boolean).join('\n\n');
   }
-  if (['.txt', '.md', '.tex', '.json', '.csv'].includes(ext)) {
+  if (!['.pdf', '.docx', '.doc', '.rtf', '.odt', '.html', '.htm'].includes(ext)) {
     const decoded = Buffer.from(rawB64, 'base64').toString('utf8').trim();
-    return [cleanPaste, decoded].filter(Boolean).join('\n\n');
+    const mergedText = [cleanPaste, decoded].filter(Boolean).join('\n\n').trim();
+    if (mergedText.length < 40) {
+      throw new Error(`Could not extract readable text from ${filename}. Try pasting CV text or uploading a text-based PDF/Markdown file.`);
+    }
+    return mergedText;
   }
 
-  const tmpPath = path.join('/tmp', `cv-upload-${Date.now()}${ext}`);
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arena-cv-'));
+  const tmpPath = path.join(tmpDir, `upload${ext}`);
   await fs.writeFile(tmpPath, Buffer.from(rawB64, 'base64'));
   try {
     let extracted = '';
     if (ext === '.pdf') {
       extracted = await extractPdfWithMacOs(tmpPath);
-    } else if (['.docx', '.doc', '.rtf', '.odt', '.html', '.htm'].includes(ext)) {
+    } else {
       const { stdout } = await execFileAsync('/usr/bin/textutil', ['-convert', 'txt', '-stdout', tmpPath], {
         timeout: 20000,
         maxBuffer: 8 * 1024 * 1024
       });
       extracted = stdout.trim();
-    } else {
-      extracted = Buffer.from(rawB64, 'base64').toString('utf8').trim();
     }
     const merged = [cleanPaste, extracted].filter(Boolean).join('\n\n').trim();
     if (merged.length < 40) {
@@ -169,16 +172,17 @@ export async function extractDocumentText({ filename = 'cv.txt', base64Data = ''
     }
     return merged;
   } finally {
-    await fs.unlink(tmpPath).catch(() => {});
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
 export async function readStaticJds() {
   const jds = [];
   const jdDir = path.join(ROOT_DIR, 'job-descriptions');
+  if (!existsSync(jdDir)) return jds;
   for (const file of (await fs.readdir(jdDir)).sort()) {
     if (!file.endsWith('.md')) continue;
-    const content = await fs.readFile(path.join(jdDir, file), 'utf8');
+    const content = await fs.readFile(path.join(jdDir, file), 'utf8').catch(() => '');
     const heading = content.split('\n')[0]?.replace(/^#\s*/, '') || file;
     jds.push({ id: file, title: heading, content });
   }
@@ -186,12 +190,12 @@ export async function readStaticJds() {
 }
 
 export async function resolveActiveJobDescriptions(activeCv) {
-  const staticJds = await readStaticJds();
   if (!activeCv || activeCv.id === 'cv-baseline-1') {
+    const staticJds = await readStaticJds();
     const customFake = Array.isArray(activeCv?.generatedJds) ? activeCv.generatedJds : [];
     return [...customFake.map((jd) => ({ ...jd, content: formatFakeJdAsMarkdown(jd) })), ...staticJds];
   }
-  return getActiveJobDescriptions(staticJds, activeCv);
+  return getActiveJobDescriptions([], activeCv);
 }
 
 export async function buildCvResponseBundle(versions = null) {
@@ -242,9 +246,10 @@ export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fin
   }
   const cleanCompany = String(companyName || '').trim();
   if (cleanCompany) {
+    baseJdText = baseJdText.replace(/^(#\s+[^\n]+?)\s+at\s+[^\n]+$/im, (_m, roleHeading) => `${roleHeading} at ${cleanCompany}`);
     const hasCompanyLine = /\*\*Company:\*\*/i.test(baseJdText);
     baseJdText = hasCompanyLine
-      ? baseJdText.replace(/\*\*Company:\*\*[^\n]*/i, `**Company:** ${cleanCompany}`)
+      ? baseJdText.replace(/\*\*Company:\*\*[^\n]*/i, () => `**Company:** ${cleanCompany}`)
       : `**Company:** ${cleanCompany}\n${baseJdText}`;
   }
   return {
@@ -255,7 +260,8 @@ export async function resolveTargetContext({ jdFile = 'jd-01-senior-frontend-fin
 
 export async function analyzeCvAndBuildDailyPath(
   { filename = 'updated-cv.md', base64Data = '', plainText = '', plannerModel = '', visionModel = '', notes = '', candidateName = '' },
-  onProgress = null
+  onProgress = null,
+  externalSignal = null
 ) {
   let chosenModel = plannerModel;
   const emit = createProgressEmitter(Date.now(), () => chosenModel, onProgress);
@@ -286,7 +292,8 @@ export async function analyzeCvAndBuildDailyPath(
       options: { temperature: 0.35, num_predict: 5600 },
       messages: [{ role: 'user', content: prompt }]
     },
-    240000
+    240000,
+    externalSignal
   );
 
   let rawAll = '';
@@ -332,8 +339,13 @@ export async function analyzeCvAndBuildDailyPath(
     detail: `${rawAll.length} chars generated`
   });
 
-  const parsed = extractJsonSafe(rawAll);
+  if (externalSignal?.aborted) throw new Error('CV analysis cancelled');
+  const parsed = parseJsonObjectStrict(rawAll);
+  if (!parsed || (!parsed.headline && !parsed.dailyPath && !parsed.generatedJds)) {
+    throw new Error('Could not parse structured CV profile from the selected model. Please retry or pick a larger planner model.');
+  }
   const existing = await ensureCvVersions();
+  const maxOrder = existing.reduce((min, v) => Math.min(min, Number(v.sortOrder ?? 0)), 0);
   const nextNum = existing.length + 1;
   const fallbackName =
     String(candidateName || '').trim() ||
@@ -355,8 +367,8 @@ export async function analyzeCvAndBuildDailyPath(
   };
 
   insertAndActivateCvSync({
-    id: `cv-${Date.now()}`,
-    sortOrder: -nextNum,
+    id: `cv-${crypto.randomUUID()}`,
+    sortOrder: maxOrder - 1,
     versionLabel: `v${nextNum} · ${filename || 'Updated CV'}`,
     filename: filename || 'updated-cv.txt',
     createdAt: new Date().toISOString().slice(0, 10),
@@ -390,16 +402,22 @@ export async function generateFakeJobForActiveCv({ customFocus = '', plannerMode
     120000
   );
   const data = await res.json();
-  const parsed = extractJsonSafe(data?.message?.content || '');
+  const parsed = parseJsonObjectStrict(data?.message?.content || '');
+  if (!parsed || (!parsed.roleTitle && !parsed.company && !parsed.summary)) {
+    throw new Error('Could not parse generated fake job JSON from model. Please try again.');
+  }
   const normalized = normalizeGeneratedJds([parsed], activeCv.profile, activeCv.rawText)[0];
   const createdJd = {
     ...normalized,
-    id: `fake-jd-${Date.now()}`,
+    id: `fake-jd-${crypto.randomUUID()}`,
     title: `${normalized.roleTitle} — ${normalized.company}`
   };
 
-  const nextList = [createdJd, ...(Array.isArray(activeCv.generatedJds) ? activeCv.generatedJds : [])].slice(0, 6);
-  updateCvGeneratedJdsSync(activeCv.id, nextList);
+  updateCvGeneratedJdsSync(activeCv.id, (current) => {
+    const core = current.filter((j) => /^fake-jd-[123]$/.test(String(j?.id || '')));
+    const extra = current.filter((j) => !/^fake-jd-[123]$/.test(String(j?.id || '')));
+    return [createdJd, ...extra].slice(0, 6).concat(core).slice(0, 9);
+  });
   return { createdJd, ...(await buildCvResponseBundle()) };
 }
 
@@ -436,7 +454,8 @@ function normalizeGeneratedRounds(rawRounds, company, roleTitle) {
 
 export async function generateCustomInterviewPack(
   { company = '', roleTitle = '', jdText = '', plannerModel = '', notes = '' },
-  onProgress = null
+  onProgress = null,
+  externalSignal = null
 ) {
   const cleanJd = String(jdText || '').trim();
   if (cleanJd.length < 30) throw new Error('Please paste a job description or upload a screenshot first.');
@@ -520,7 +539,8 @@ Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solvin
       options: { temperature: 0.35, num_predict: 3800 },
       messages: [{ role: 'user', content: prompt }]
     },
-    240000
+    240000,
+    externalSignal
   );
 
   let rawAll = '';
@@ -569,18 +589,24 @@ Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solvin
     detail: `${rawAll.length} chars received · Writing local pack`
   });
 
-  const parsed = extractJsonSafe(rawAll);
+  if (externalSignal?.aborted) throw new Error('Custom interview generation cancelled');
+  const parsed = parseJsonObjectStrict(rawAll);
+  if (!parsed || (!parsed.company && !parsed.roleTitle && !parsed.fitSummary && !parsed.rounds)) {
+    throw new Error('Could not parse structured interview pack from the selected model. Please retry.');
+  }
   const finalCompany = String(company || parsed.company || 'Target Company').trim();
   const finalRole = String(roleTitle || parsed.roleTitle || 'Senior Engineer').trim();
+  const rawScore = Number.parseFloat(parsed.fitSummary?.matchScore);
+  const matchScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 85;
   const pack = {
-    id: `ci-${Date.now()}`,
+    id: `ci-${crypto.randomUUID()}`,
     createdAt: new Date().toISOString().slice(0, 10),
     plannerModel: chosenModel,
     company: finalCompany,
     roleTitle: finalRole,
     jdText: cleanJd,
     fitSummary: {
-      matchScore: Number(parsed.fitSummary?.matchScore || 85),
+      matchScore,
       headline: parsed.fitSummary?.headline || `Strong senior match for ${finalRole} at ${finalCompany}.`,
       keyStack: Array.isArray(parsed.fitSummary?.keyStack) ? parsed.fitSummary.keyStack : [],
       strongMatches: Array.isArray(parsed.fitSummary?.strongMatches) ? parsed.fitSummary.strongMatches : [],
@@ -594,8 +620,6 @@ Include 4 to 5 rounds covering HR, Stack Technical, Coding/System problem solvin
     rounds: normalizeGeneratedRounds(parsed.rounds, finalCompany, finalRole)
   };
 
-  const list = await ensureCustomInterviews();
-  list.unshift(pack);
-  await saveCustomInterviews(list);
+  upsertCustomInterviewSync(pack);
   return pack;
 }

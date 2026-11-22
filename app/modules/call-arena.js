@@ -1,15 +1,71 @@
 import { esc, consumeNdjsonStream, saveUserState } from '../components.js';
 import { pickRandomCompanyName } from '../../shared/company.mjs';
+import { computeCallSpeechMetrics } from '../../shared/speech-metrics.mjs';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
 import { getActiveAgentMeta, rollAppearance, rollOfficeBackdrop, inferVoiceGender, renderAvatarVisual, updateAvatarStage, setAvatarState } from './avatar.js';
 import { rollDetailedDna } from './avatar-detailed.js';
-import { populateZonosVoiceDropdowns, stopAllSpeech, enqueueSpeakSentence, speakEnglish, syncVideoStreams, toggleCamera, stopMediaStream, upsertLiveDraftBubble } from './voice-media.js';
+import { inferEarlyExpression } from './avatar-motion.js';
+import { populateZonosVoiceDropdowns, stopAllSpeech, enqueueSpeakSentence, speakEnglish, syncVideoStreams, toggleCamera, stopMediaStream, upsertLiveDraftBubble, getSpeechLipLevel } from './voice-media.js';
+import { playCallJoinChime, playCallLeaveChime, setRoomToneEnabled, stopRoomTone, prewarmBackchannels, playBackchannelCue } from './call-audio.js';
+import { resetVadSession, syncMicModeUi, getMicMode, isHandsFreePaused, setHandsFreePaused } from './call-vad.js';
+import {
+  startCallElapsedTimer,
+  stopCallElapsedTimer,
+  getCallDurationState,
+  showConnectingOverlay,
+  hideConnectingOverlay,
+  syncCaptionsToggleUi,
+  applyExamModeUi,
+  applyCallLayoutUi,
+  startNameplateEqualizer,
+  stopNameplateEqualizer,
+  clearLiveCaption
+} from './call-ui.js';
+import { renderScreenShareForTopic, setScreenShareOpen, getActiveScreenSharePayload, wireScreenShareEvents } from './screen-share.js';
 import { setScratchpadOpen, stopLogicTimer, startLogicTimer, renderTutorPin, updateScratchpadSyncPill, renderScratchpadForPuzzle, wireScratchpadEvents } from './scratchpad.js';
 import { renderHud, showScorecardDialog, renderStats, renderMistakes } from './stats-shop.js';
 import { pickRandomPersonality } from './lobby.js';
 
 let onRefreshViews = () => {};
 let onNavigate = () => {};
+let activeSessionSeq = 0;
+let activeTurnAbortController = null;
+let isTurnInFlight = false;
+
+function clearShieldState() {
+  if (state.shieldInterval) {
+    clearInterval(state.shieldInterval);
+    state.shieldInterval = null;
+  }
+  if ($('#shield-timer')) $('#shield-timer').hidden = true;
+  if ($('#hint-drawer')) $('#hint-drawer').hidden = true;
+}
+
+export function endCallCleanup({ withChime = false } = {}) {
+  const wasInArena = activeSessionSeq > 0 && !$('#view-arena')?.classList.contains('inactive');
+  activeSessionSeq += 1;
+  if (activeTurnAbortController) {
+    try { activeTurnAbortController.abort(); } catch {}
+    activeTurnAbortController = null;
+  }
+  isTurnInFlight = false;
+  stopAllSpeech();
+  stopRoomTone();
+  if (withChime && wasInArena) playCallLeaveChime();
+  stopLogicTimer();
+  stopCallElapsedTimer();
+  stopNameplateEqualizer();
+  clearShieldState();
+  clearLiveCaption();
+  hideConnectingOverlay();
+  resetVadSession();
+  setScreenShareOpen(false);
+  if (state.isListening && state.recognition) {
+    state.pendingSendOnMicStop = false;
+    try { state.recognition.stop(); } catch {}
+  }
+  stopMediaStream();
+}
 
 export function setChatDrawerOpen(open) {
   state.chatOpen = Boolean(open);
@@ -87,6 +143,19 @@ function wireCardSpeechActions(card, { said = '', better = '' }) {
 }
 
 export function renderCoachFeedback(reply) {
+  if (state.activeSession?.examMode && reply) {
+    const deferred = state.activeSession.deferredCoachItems || (state.activeSession.deferredCoachItems = []);
+    if (reply.coachPause) deferred.push({ kind: 'pause', data: reply.coachPause });
+    if (Array.isArray(reply.grammarFixes)) {
+      for (const fix of reply.grammarFixes) {
+        if (fix?.said && fix?.better) deferred.push({ kind: 'fix', data: fix });
+      }
+    }
+    if (reply.microTip || reply.microTipHu) {
+      deferred.push({ kind: 'tip', data: reply.microTip || reply.microTipHu });
+    }
+    return;
+  }
   const box = $('#coach-box');
   const overlay = $('#video-tips-overlay');
   if (!box) return;
@@ -115,7 +184,7 @@ export function renderCoachFeedback(reply) {
       <div class="coach-pause-head">
         <h4>🛑 COACH PAUSE — ${esc(p.category || 'Senior Upgrade')}</h4>
         ${firstUpgrade ? `<div class="coach-pause-actions">
-          <button type="button" class="mini-pu-btn btn-hear-fix" title="Hear Senior phrasing">🔊</button>
+          <button type="button" class="mini-pu-btn btn-hear-fix" title="Hear Senior phrasing" aria-label="Hear Senior phrasing">🔊</button>
           <button type="button" class="mini-pu-btn btn-retry-fix" title="Practice saying this phrasing again (+25 XP)">🔄 Say It Again</button>
         </div>` : ''}
       </div>
@@ -137,7 +206,7 @@ export function renderCoachFeedback(reply) {
         <div class="grammar-card-head">
           <span class="grammar-badge">✏️ ${esc(fix.type || 'Grammar Fix')}</span>
           <div class="grammar-card-actions">
-            <button type="button" class="mini-pu-btn btn-hear-fix" title="Hear corrected phrasing">🔊</button>
+            <button type="button" class="mini-pu-btn btn-hear-fix" title="Hear corrected phrasing" aria-label="Hear corrected phrasing">🔊</button>
             <button type="button" class="mini-pu-btn btn-retry-fix" title="Practice saying this phrasing again (+25 XP)">🔄 Say It Again</button>
           </div>
         </div>
@@ -160,8 +229,16 @@ export function renderCoachFeedback(reply) {
 }
 
 export async function startSession(cfg) {
+  activeSessionSeq += 1;
+  if (activeTurnAbortController) {
+    try { activeTurnAbortController.abort(); } catch {}
+    activeTurnAbortController = null;
+  }
+  isTurnInFlight = false;
+  state.lobbyCfg = null;
   stopAllSpeech();
   stopLogicTimer();
+  clearShieldState();
   const isTutor = cfg.mode === 'tutor';
   const isLogic = cfg.mode === 'logic';
   const isPractice = isTutor || isLogic;
@@ -195,22 +272,30 @@ export async function startSession(cfg) {
     ? (cfg.interviewerCompany || pickRandomCompanyName(`${state.activeCv?.rawText || ''} ${state.activeCv?.profile?.profilePrompt || ''}`))
     : '';
 
+  const examMode = cfg.examMode !== undefined ? Boolean(cfg.examMode) : Boolean(state.user?.defaultExamMode);
+  const durationMinutes = Number(cfg.durationMinutes || state.user?.defaultDurationMinutes || 12);
+
   state.activeSession = {
     mode: isLogic ? 'logic' : isTutor ? 'tutor' : 'interview',
     guestMode: Boolean(cfg.guestMode && isPractice),
     ...cfg,
     interviewerCompany,
+    examMode,
+    targetDurationMinutes: durationMinutes,
     liveExpression: 'warm',
     voice,
     personality,
     appearance,
     messages: [],
+    deferredCoachItems: [],
+    lastTurnInterrupted: false,
+    metrics: { userSpeakMs: 0, aiSpeakMs: 0, turnDurationsMs: [] },
     doubleXpActive: false
   };
   syncCandidateIdentity();
   if ($('#btn-finish-eval')) $('#btn-finish-eval').textContent = isPractice ? '📊 Session Wrap-Up' : '📊 Score (1–10)';
   if ($('#continuous-flow-toggle')) {
-    $('#continuous-flow-toggle').checked = isPractice ? true : (cfg.continuous !== undefined ? Boolean(cfg.continuous) : cfg.topic === 'HR');
+    $('#continuous-flow-toggle').checked = (isPractice || examMode) ? true : (cfg.continuous !== undefined ? Boolean(cfg.continuous) : cfg.topic === 'HR');
   }
   populateZonosVoiceDropdowns();
   if ($('#arena-voice-select')) $('#arena-voice-select').value = voice;
@@ -218,14 +303,21 @@ export async function startSession(cfg) {
   state.unreadChatCount = 0;
   clearRetryPractice();
   setChatDrawerOpen(false);
+  applyExamModeUi(examMode);
+  applyCallLayoutUi(state.user?.defaultLayout || 'spotlight');
+  syncCaptionsToggleUi();
+  resetVadSession();
+  syncMicModeUi();
   if ($('#btn-toggle-scratchpad')) $('#btn-toggle-scratchpad').hidden = !isLogic;
   if (isLogic && cfg.logicPuzzle) {
     renderScratchpadForPuzzle(cfg.logicPuzzle);
     setScratchpadOpen(true);
+    setScreenShareOpen(false);
     startLogicTimer(Number(cfg.logicPuzzle.durationMinutes || 10) * 60);
   } else {
     setScratchpadOpen(false);
     renderTutorPin(null);
+    renderScreenShareForTopic(cfg.topic);
   }
 
   $('#arena-subtitle').textContent = `${cfg.title}${interviewerCompany ? ` · ${interviewerCompany}` : ''} • Model: ${state.user.selectedModel}`;
@@ -243,14 +335,29 @@ export async function startSession(cfg) {
   renderAvatarVisual(true);
   setAvatarState('thinking');
   syncVideoStreams();
+  const targetPerson = cfg.tutorTeacher?.name || meta?.avatarName || 'Interviewer';
+  showConnectingOverlay(`Connecting to ${targetPerson}${interviewerCompany ? ` · ${interviewerCompany}` : ''}...`);
   onNavigate('view-arena');
+  startCallElapsedTimer(durationMinutes);
+  startNameplateEqualizer(getSpeechLipLevel);
+  playCallJoinChime();
+  setRoomToneEnabled(Boolean(state.user?.callAmbientAudio));
+  prewarmBackchannels(voice, personality?.vibe || 'warm');
 
-  await sendChatTurn('start');
+  try {
+    await sendChatTurn('start');
+  } finally {
+    hideConnectingOverlay();
+  }
 }
 
 function buildChatRequestPayload({ model, action, continuousFlow, currentPad, padChanged, boardCheckOnly }) {
   const s = state.activeSession;
   const isLogic = s?.mode === 'logic';
+  const dur = getCallDurationState();
+  const ss = getActiveScreenSharePayload();
+  const interrupted = Boolean(s.lastTurnInterrupted);
+  s.lastTurnInterrupted = false;
   return {
     model,
     modelContextTier: state.user?.modelContextTier || 'auto',
@@ -276,11 +383,24 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
     messages: s.messages,
     action,
     continuousFlow,
+    elapsedSeconds: dur.elapsedSeconds,
+    targetDurationSeconds: dur.targetDurationSeconds,
+    interrupted,
+    screenShareId: ss?.screenShareId || null,
+    highlightedLines: ss?.highlightedLines || [],
+    artifactNotes: ss?.artifactNotes || '',
+    speechMetrics: action === 'finish' ? computeCallSpeechMetrics({ messages: s.messages, ...(s.metrics || {}) }) : null,
     doubleXpActive: Boolean(s.doubleXpActive)
   };
 }
 
 export async function sendChatTurn(action, userText = null, userEntryRef = null, opts = {}) {
+  if (isTurnInFlight) return;
+  const turnSeq = activeSessionSeq;
+  const ac = new AbortController();
+  activeTurnAbortController = ac;
+  isTurnInFlight = true;
+
   const model = state.user?.selectedModel || 'qwen2.5:7b';
   const isLogic = state.activeSession?.mode === 'logic';
   const currentPad = isLogic ? ($('#scratchpad-editor')?.value || '') : '';
@@ -300,9 +420,12 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
   }
 
   const sendBtn = $('#send-btn');
-  sendBtn.disabled = true;
-  sendBtn.textContent = 'Thinking...';
-  setAvatarState('thinking');
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Thinking...';
+  }
+  if ($('#btn-finish-eval')) $('#btn-finish-eval').disabled = true;
+  if (!opts?.silent) setAvatarState('thinking');
 
   const continuousFlow = $('#continuous-flow-toggle') ? $('#continuous-flow-toggle').checked : state.activeSession.topic === 'HR';
   const payload = buildChatRequestPayload({ model, action, continuousFlow, currentPad, padChanged, boardCheckOnly: opts?.boardCheckOnly });
@@ -312,14 +435,16 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: ac.signal
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Chat failed');
+      if (turnSeq !== activeSessionSeq) return;
       state.user = data.state;
       renderHud();
       const reply = data.reply;
-      if (reply.spokenEnglish) {
+      if (reply.spokenEnglish && !opts?.silent) {
         appendChatBubble('ai', reply.spokenEnglish);
         state.activeSession.messages.push({ role: 'assistant', content: reply.spokenEnglish });
         speakEnglish(reply.spokenEnglish);
@@ -328,12 +453,16 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       }
       renderCoachFeedback(reply);
       if (reply.scorecard) {
-        showScorecardDialog(reply.scorecard, data.xpEarned);
+        showScorecardDialog(reply.scorecard, data.xpEarned, {
+          speechMetrics: payload.speechMetrics,
+          deferredCoachItems: state.activeSession?.deferredCoachItems || []
+        });
         renderStats();
         renderMistakes();
         onRefreshViews();
       }
     } catch (err) {
+      if (err?.name === 'AbortError' || turnSeq !== activeSessionSeq) return;
       setAvatarState('idle');
       const box = $('#coach-box');
       const errDiv = document.createElement('div');
@@ -341,8 +470,13 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       errDiv.innerHTML = `<h4>⚠️ Connection Issue</h4><p>${esc(err.message)}</p>`;
       box.prepend(errDiv);
     } finally {
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'Send ▶';
+      if (activeTurnAbortController === ac) activeTurnAbortController = null;
+      isTurnInFlight = false;
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send ▶';
+      }
+      if ($('#btn-finish-eval')) $('#btn-finish-eval').disabled = false;
     }
     return;
   }
@@ -350,6 +484,16 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
   let streamBubble = null;
   let streamBodyEl = null;
   let spokenQueuedUpTo = 0;
+  let streamedAccum = '';
+  let receivedFirstToken = false;
+  const thinkingCueTimer = setTimeout(() => {
+    if (!receivedFirstToken && turnSeq === activeSessionSeq) {
+      if ($('#avatar-status-pill')) $('#avatar-status-pill').textContent = '💭 Considering your point...';
+      if (action === 'turn' && String(userText || '').trim().split(/\s+/).filter(Boolean).length >= 6) {
+        playBackchannelCue(state.activeSession?.voice, state.activeSession?.liveExpression || 'warm');
+      }
+    }
+  }, 1350);
 
   try {
     const res = await fetch('/api/chat/stream', {
@@ -358,18 +502,19 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       body: JSON.stringify({
         ...payload,
         retryOf: activeRetry ? { said: activeRetry.said, better: activeRetry.better } : null
-      })
+      }),
+      signal: ac.signal
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || `HTTP ${res.status}`);
     }
-    if (action === 'start') $('#coach-box').innerHTML = '';
 
     let finalDone = null;
     let firstSpeechStarted = false;
 
     const flushReadySentences = (spokenSoFar, isFinal = false) => {
+      if (turnSeq !== activeSessionSeq) return;
       if (!$('#auto-speak-toggle').checked) return;
       const unseen = spokenSoFar.slice(spokenQueuedUpTo);
       if (!unseen.trim()) return;
@@ -379,37 +524,55 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
         firstSpeechStarted = true;
         return;
       }
-      const sentenceRe = /([\s\S]+?(?<!\b(?:Ms|Mr|Mrs|Dr|vs|e\.g|i\.e))(?<!\d)[.!?])(?:\s+|$)/g;
+      const sentenceRe = /([\s\S]+?(?<!\b(?:Ms|Mr|Mrs|Dr|vs|e\.g|i\.e))(?<!\d)[.!?])\s+/g;
       let match;
       let consumed = 0;
+      let buffered = '';
       while ((match = sentenceRe.exec(unseen)) !== null) {
-        const sentence = match[1].trim();
-        consumed = match.index + match[0].length;
-        if (sentence.length >= 6) {
-          enqueueSpeakSentence(sentence, { reset: !firstSpeechStarted });
+        const chunkText = match[1].trim();
+        const combined = buffered ? `${buffered} ${chunkText}` : chunkText;
+        if (combined.length >= 6) {
+          consumed = match.index + match[0].length;
+          buffered = '';
+          enqueueSpeakSentence(combined, { reset: !firstSpeechStarted });
           firstSpeechStarted = true;
+        } else {
+          buffered = combined;
+          consumed = match.index + match[0].length;
         }
       }
-      if (consumed > 0) spokenQueuedUpTo += consumed;
+      if (consumed > 0 && !buffered) spokenQueuedUpTo += consumed;
     };
 
     await consumeNdjsonStream(res, (evt) => {
+      if (turnSeq !== activeSessionSeq) return;
+      if (evt.type === 'error') throw new Error(evt.error || 'Stream error');
       if (evt.type === 'thinking') setAvatarState('thinking');
       else if (evt.type === 'token') {
+        if (!receivedFirstToken) {
+          receivedFirstToken = true;
+          clearTimeout(thinkingCueTimer);
+        }
+        streamedAccum = evt.spokenSoFar || '';
+        if (state.activeSession && streamedAccum.length >= 18) {
+          state.activeSession.liveExpression = inferEarlyExpression(streamedAccum, state.activeSession.liveExpression);
+        }
         if (!streamBubble) {
-          streamBubble = appendChatBubble('ai', evt.spokenSoFar || '', 'msg-streaming');
+          streamBubble = appendChatBubble('ai', streamedAccum, 'msg-streaming');
           streamBodyEl = streamBubble.querySelector('.msg-body');
         } else {
-          streamBodyEl.textContent = evt.spokenSoFar || '';
+          streamBodyEl.textContent = streamedAccum;
           const log = $('#chat-log');
           log.scrollTop = log.scrollHeight;
         }
-        flushReadySentences(evt.spokenSoFar || '', false);
+        flushReadySentences(streamedAccum, false);
       } else if (evt.type === 'done') {
+        clearTimeout(thinkingCueTimer);
         finalDone = evt;
       }
     });
 
+    if (turnSeq !== activeSessionSeq) return;
     if (finalDone) {
       state.user = finalDone.state;
       renderHud();
@@ -421,6 +584,7 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
         $('#arena-subtitle').textContent = `${state.activeSession?.tutorTeacher?.name || 'Tutor'} · Fresh Topic: ${finalDone.tutorAngle} • Model: ${model}`;
       } else if (finalDone.interviewerCompany && state.activeSession?.mode === 'interview' && !state.activeSession?.customInterviewId) {
         state.activeSession.interviewerCompany = finalDone.interviewerCompany;
+        $('#arena-subtitle').textContent = `${state.activeSession.title || state.activeSession.topic} · ${finalDone.interviewerCompany} • Model: ${model}`;
       }
       if (activeRetry?.card?.isConnected) {
         activeRetry.card.classList.add('is-practiced');
@@ -439,6 +603,9 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
           streamBodyEl.textContent = reply.spokenEnglish;
         }
         state.activeSession.messages.push({ role: 'assistant', content: reply.spokenEnglish });
+        if (streamedAccum && reply.spokenEnglish.slice(0, spokenQueuedUpTo) !== streamedAccum.slice(0, spokenQueuedUpTo)) {
+          spokenQueuedUpTo = 0;
+        }
         flushReadySentences(reply.spokenEnglish, true);
         if (!$('#auto-speak-toggle').checked) setAvatarState('idle');
       } else {
@@ -449,6 +616,7 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       setAvatarState('idle');
     }
   } catch (err) {
+    if (err?.name === 'AbortError' || turnSeq !== activeSessionSeq) return;
     setAvatarState('idle');
     const box = $('#coach-box');
     const errDiv = document.createElement('div');
@@ -456,8 +624,14 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
     errDiv.innerHTML = `<h4>⚠️ Ollama Connection Issue</h4><p>${esc(err.message)}</p><p>Click <strong>Setup</strong> in the top bar to start Ollama or pull <code>${esc(model)}</code>.</p>`;
     box.prepend(errDiv);
   } finally {
-    sendBtn.disabled = false;
-    sendBtn.textContent = 'Send ▶';
+    clearTimeout(thinkingCueTimer);
+    if (activeTurnAbortController === ac) activeTurnAbortController = null;
+    isTurnInFlight = false;
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send ▶';
+    }
+    if ($('#btn-finish-eval')) $('#btn-finish-eval').disabled = false;
   }
 }
 
@@ -473,11 +647,52 @@ export function wireArenaEvents({ switchToView, refreshHome }) {
   onRefreshViews = refreshHome;
 
   wireScratchpadEvents(shareScratchpadWithTutor);
+  wireScreenShareEvents();
 
   $('#btn-toggle-cam').addEventListener('click', toggleCamera);
   $('#btn-toggle-chat').addEventListener('click', () => setChatDrawerOpen(!state.chatOpen));
   $('#btn-close-chat').addEventListener('click', () => setChatDrawerOpen(false));
   $('#btn-cancel-retry')?.addEventListener('click', clearRetryPractice);
+
+  $('#btn-toggle-cc')?.addEventListener('click', () => {
+    if (!state.user) return;
+    state.user.showCaptions = state.user.showCaptions === false;
+    syncCaptionsToggleUi();
+    saveUserState({ showCaptions: state.user.showCaptions }).catch(() => {});
+  });
+
+  $('#btn-toggle-layout')?.addEventListener('click', () => {
+    if (!state.user) return;
+    const nextLayout = state.user.defaultLayout === 'split' ? 'spotlight' : 'split';
+    state.user.defaultLayout = nextLayout;
+    applyCallLayoutUi(nextLayout);
+    saveUserState({ defaultLayout: nextLayout }).catch(() => {});
+  });
+
+  $('#call-exam-toggle')?.addEventListener('change', (e) => {
+    applyExamModeUi(Boolean(e.target.checked));
+    $('#call-more-popover')?.hidePopover?.();
+  });
+
+  $('#call-ambient-toggle')?.addEventListener('change', (e) => {
+    const enabled = Boolean(e.target.checked);
+    if (state.user) state.user.callAmbientAudio = enabled;
+    setRoomToneEnabled(enabled);
+    saveUserState({ callAmbientAudio: enabled }).catch(() => {});
+  });
+
+  $('#call-mic-mode-select')?.addEventListener('change', (e) => {
+    const nextMode = e.target.value;
+    if (state.user) state.user.micMode = nextMode;
+    syncMicModeUi();
+    saveUserState({ micMode: nextMode }).catch(() => {});
+  });
+
+  $('#mic-mode-badge')?.addEventListener('click', () => {
+    if (getMicMode() === 'handsfree') {
+      setHandsFreePaused(!isHandsFreePaused());
+    }
+  });
 
   $('#btn-toggle-tips').addEventListener('click', () => {
     const overlay = $('#video-tips-overlay');
@@ -487,25 +702,23 @@ export function wireArenaEvents({ switchToView, refreshHome }) {
     $('#btn-toggle-tips').setAttribute('aria-expanded', String(!collapsed));
   });
 
-  const endCallCleanup = () => {
-    stopAllSpeech();
-    stopLogicTimer();
-    if (state.isListening && state.recognition) {
-      state.pendingSendOnMicStop = false;
-      try { state.recognition.stop(); } catch {}
-    }
-    stopMediaStream();
-  };
-
   $('#btn-call-back').addEventListener('click', () => {
+    $('#call-more-popover')?.hidePopover?.();
     endCallCleanup();
     switchToView('view-path');
   });
 
   $('#btn-hangup').addEventListener('click', async () => {
-    endCallCleanup();
-    if (state.activeSession.messages.some((m) => m.role === 'user')) await sendChatTurn('finish');
-    switchToView('view-path');
+    const hadUserTurns = Boolean(state.activeSession?.messages?.some((m) => m.role === 'user'));
+    const btn = $('#btn-hangup');
+    if (btn) btn.disabled = true;
+    try {
+      endCallCleanup({ withChime: true });
+      if (hadUserTurns) await sendChatTurn('finish', null, null, { silent: true });
+      switchToView('view-path');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   });
 
   $('#auto-speak-toggle').addEventListener('change', () => {
@@ -517,8 +730,16 @@ export function wireArenaEvents({ switchToView, refreshHome }) {
 
   $('#arena-voice-select').addEventListener('change', (e) => {
     const zonosVoice = e.target.value;
-    state.activeSession.voice = zonosVoice;
-    state.user.zonosVoice = zonosVoice;
+    const prevGender = inferVoiceGender(state.activeSession?.voice);
+    const nextGender = inferVoiceGender(zonosVoice);
+    if (state.activeSession) {
+      state.activeSession.voice = zonosVoice;
+      if (prevGender !== nextGender && state.activeSession.appearance) {
+        const meta = getActiveAgentMeta(state.activeSession.agentFile);
+        state.activeSession.appearance.dna = rollDetailedDna(meta, state.activeSession.personality, nextGender);
+      }
+    }
+    if (state.user) state.user.zonosVoice = zonosVoice;
     if ($('#zonos-voice-select')) $('#zonos-voice-select').value = zonosVoice;
     updateAvatarStage();
     saveUserState({ zonosVoice }).catch(() => {});

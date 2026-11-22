@@ -1,5 +1,12 @@
-import { OLLAMA_BASE } from './config.mjs';
+import { OLLAMA_BASE, MODEL_ALIASES } from './config.mjs';
 import { detectModelParamBillions } from '../shared/model-tiers.mjs';
+
+let activeOllamaBase = OLLAMA_BASE;
+
+export function resolveModelAlias(modelName = '') {
+  const raw = String(modelName || '').trim();
+  return MODEL_ALIASES[raw] || raw;
+}
 
 export function stripThinkBlocks(rawText) {
   return String(rawText || '')
@@ -13,9 +20,16 @@ export async function consumeNdjsonBody(bodyStream, onObj) {
   let ndjsonBuf = '';
   const flushLine = (line) => {
     if (!line.trim()) return;
+    let parsed;
     try {
-      onObj(JSON.parse(line));
-    } catch {}
+      parsed = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (parsed && typeof parsed === 'object' && parsed.error) {
+      throw new Error(String(parsed.error));
+    }
+    onObj(parsed);
   };
   for await (const chunk of bodyStream) {
     ndjsonBuf += decoder.decode(chunk, { stream: true });
@@ -29,25 +43,64 @@ export async function consumeNdjsonBody(bodyStream, onObj) {
   }
 }
 
-export function extractJsonSafe(rawText) {
-  const trimmed = stripThinkBlocks(rawText).trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced) {
-      try {
-        return JSON.parse(fenced[1].trim());
-      } catch {}
+function isPlainObject(val) {
+  return Boolean(val && typeof val === 'object' && !Array.isArray(val));
+}
+
+function scanBalancedJsonObject(str) {
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') inStr = false;
+      continue;
     }
-    const firstBrace = trimmed.indexOf('{');
-    const lastBrace = trimmed.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
-      } catch {}
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === '}' && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        try {
+          const parsed = JSON.parse(str.slice(start, i + 1));
+          if (isPlainObject(parsed)) return parsed;
+        } catch {}
+        start = -1;
+      }
     }
   }
+  return null;
+}
+
+export function parseJsonObjectStrict(rawText) {
+  const trimmed = stripThinkBlocks(rawText).trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (isPlainObject(parsed)) return parsed;
+  } catch {}
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    try {
+      const parsed = JSON.parse(fenced[1].trim());
+      if (isPlainObject(parsed)) return parsed;
+    } catch {}
+    const balancedFenced = scanBalancedJsonObject(fenced[1].trim());
+    if (balancedFenced) return balancedFenced;
+  }
+  return scanBalancedJsonObject(trimmed);
+}
+
+export function extractJsonSafe(rawText) {
+  const strict = parseJsonObjectStrict(rawText);
+  if (strict) return strict;
+  const trimmed = stripThinkBlocks(rawText).trim();
   return {
     spokenEnglish: trimmed.replace(/```[\s\S]*?```/g, '').trim() || "Let's continue. Could you tell me more about your architectural approach?",
     coachPause: null,
@@ -62,29 +115,39 @@ export function findCoachMarker(txt) {
   const exact = txt.indexOf(COACH_JSON_DELIMITER);
   if (exact !== -1) return { idx: exact, markerLen: COACH_JSON_DELIMITER.length };
   const fallbackMatch =
-    txt.match(/(?:\r?\n|\s+)(?:---+|```(?:json)?)\s*\{\s*"(?:coachPause|grammarFixes|scratchpadPin|microTipHu)"/i) ||
-    txt.match(/(?:\r?\n|\s+)\{\s*"(?:coachPause|grammarFixes)"\s*:/i);
+    txt.match(/(?:\r?\n|\s+)(?:---+|```(?:json)?)\s*\{\s*"(?:expression|coachPause|grammarFixes|scratchpadPin|microTipHu)"/i) ||
+    txt.match(/(?:\r?\n|\s+)\{\s*"(?:expression|coachPause|grammarFixes|scratchpadPin|microTipHu)"\s*:/i);
   if (fallbackMatch && fallbackMatch.index !== undefined) {
     return { idx: fallbackMatch.index, markerLen: fallbackMatch[0].indexOf('{') };
   }
   return { idx: -1, markerLen: 0 };
 }
 
-export async function fetchOllamaChat(payload, timeoutMs = 0) {
-  const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-  let res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+export async function fetchOllamaChat(payload, timeoutMs = 0, externalSignal = null) {
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
+  const signal = externalSignal && timeoutSignal
+    ? AbortSignal.any([externalSignal, timeoutSignal])
+    : (externalSignal || timeoutSignal || undefined);
+  const resolvedPayload = {
+    keep_alive: '15m',
+    think: false,
+    ...payload,
+    model: resolveModelAlias(payload?.model || '')
+  };
+  let res = await fetch(`${activeOllamaBase}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keep_alive: '15m', think: false, ...payload }),
+    body: JSON.stringify(resolvedPayload),
     signal
   });
   if (!res.ok) {
     const errText = await res.text();
     if (/think/i.test(errText)) {
-      res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      const { think: _omit, ...noThinkPayload } = resolvedPayload;
+      res = await fetch(`${activeOllamaBase}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_alive: '15m', ...payload }),
+        body: JSON.stringify(noThinkPayload),
         signal
       });
     } else {
@@ -100,18 +163,20 @@ export async function fetchOllamaChat(payload, timeoutMs = 0) {
 let cachedInventoryByName = new Map();
 
 export function getCachedModelMeta(modelName = '') {
-  return cachedInventoryByName.get(String(modelName || '').trim()) || null;
+  const resolved = resolveModelAlias(modelName);
+  return cachedInventoryByName.get(resolved) || cachedInventoryByName.get(String(modelName || '').trim()) || null;
 }
 
 export async function getOllamaTagInventory() {
   let ollamaRunning = false;
   let installedModels = [];
   let ollamaError = null;
-  const bases = [...new Set([OLLAMA_BASE, 'http://127.0.0.1:11434', 'http://localhost:11434'])];
+  const bases = [...new Set([activeOllamaBase, OLLAMA_BASE, 'http://127.0.0.1:11434', 'http://localhost:11434'])];
   for (const base of bases) {
     try {
       const resp = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(2000) });
       if (resp.ok) {
+        activeOllamaBase = base;
         const data = await resp.json();
         ollamaRunning = true;
         ollamaError = null;

@@ -27,16 +27,16 @@ import {
 } from './server/config.mjs';
 import {
   ensureState,
-  saveState,
+  mutateStateSync,
   ensureCustomInterviews,
-  saveCustomInterviews,
+  deleteCustomInterviewSync,
   activateCvVersion,
   deleteCvVersion,
   getStudentMemorySync,
   saveStudentMemorySync,
   resetStudentMemorySync
 } from './server/db.mjs';
-import { pickRecommendedPlannerModels, pickVisionModels } from './server/ollama.mjs';
+import { pickRecommendedPlannerModels, pickVisionModels, resolveModelAlias } from './server/ollama.mjs';
 import {
   getSetupStatus,
   startZonosIfBuilt,
@@ -62,11 +62,45 @@ import {
   getLogicPuzzleHint
 } from './server/chat-service.mjs';
 
-async function readJsonBody(req) {
+async function readBodyBuffer(req, maxBytes = 1024 * 1024) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      const err = new Error('Payload too large');
+      err.statusCode = 413;
+      req.destroy();
+      throw err;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(req, maxBytes = 1024 * 1024) {
+  const buf = await readBodyBuffer(req, maxBytes);
+  if (buf.length === 0) return {};
+  const ctype = String(req.headers['content-type'] || '').toLowerCase();
+  if (ctype && !ctype.includes('application/json')) {
+    const err = new Error('Content-Type must be application/json');
+    err.statusCode = 415;
+    throw err;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(buf.toString('utf8'));
+  } catch {
+    const err = new Error('Invalid JSON request body');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const err = new Error('Request body must be a JSON object');
+    err.statusCode = 400;
+    throw err;
+  }
+  return parsed;
 }
 
 function sendJson(res, status, data) {
@@ -74,7 +108,27 @@ function sendJson(res, status, data) {
   if (!res.writableEnded) res.end(JSON.stringify(data));
 }
 
-async function streamNdjsonTask(res, runner) {
+function isAllowedOrigin(req) {
+  const host = String(req.headers.host || '').toLowerCase();
+  const validHosts = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
+  if (host && !validHosts.has(host)) return false;
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const secSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+    if (secSite === 'cross-site') return false;
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://localhost:${PORT}` && origin !== `http://127.0.0.1:${PORT}`) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function streamNdjsonTask(req, res, runner) {
+  const ac = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) ac.abort();
+  });
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache',
@@ -82,15 +136,15 @@ async function streamNdjsonTask(res, runner) {
   });
   res.flushHeaders?.();
   const writeEvent = (obj) => {
-    if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
+    if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify(obj) + '\n');
   };
   try {
-    const result = await runner((ev) => writeEvent({ type: 'progress', ...ev }));
-    writeEvent({ type: 'done', ...result });
+    const result = await runner((ev) => writeEvent({ type: 'progress', ...ev }), ac.signal);
+    if (!ac.signal.aborted) writeEvent({ type: 'done', ...result });
   } catch (err) {
-    writeEvent({ type: 'error', error: err.message });
+    if (!ac.signal.aborted) writeEvent({ type: 'error', error: err.message });
   }
-  if (!res.writableEnded) res.end();
+  if (!res.writableEnded && !res.destroyed) res.end();
 }
 
 function cleanMdInline(s) {
@@ -110,19 +164,28 @@ function parseCheatsheet(md) {
 }
 
 function applyStatePatch(state, patch) {
-  if (patch.selectedModel) state.selectedModel = patch.selectedModel;
+  if (typeof patch.selectedModel === 'string' && patch.selectedModel.trim()) state.selectedModel = patch.selectedModel.trim().slice(0, 120);
   if (['auto', 'small', 'medium', 'large'].includes(patch.modelContextTier)) state.modelContextTier = patch.modelContextTier;
-  if (patch.plannerModel !== undefined) state.plannerModel = patch.plannerModel;
-  if (patch.visionModel !== undefined) state.visionModel = patch.visionModel;
-  if (patch.preferredVoice !== undefined) state.preferredVoice = patch.preferredVoice;
-  if (patch.ttsEngine) state.ttsEngine = patch.ttsEngine;
-  if (patch.zonosVoice) state.zonosVoice = patch.zonosVoice;
+  if (typeof patch.plannerModel === 'string') state.plannerModel = patch.plannerModel.trim().slice(0, 120);
+  if (typeof patch.visionModel === 'string') state.visionModel = patch.visionModel.trim().slice(0, 120);
+  if (typeof patch.preferredVoice === 'string') state.preferredVoice = patch.preferredVoice.trim().slice(0, 120);
+  if (['auto', 'zonos', 'browser'].includes(patch.ttsEngine)) state.ttsEngine = patch.ttsEngine;
+  if (typeof patch.zonosVoice === 'string' && patch.zonosVoice.trim()) state.zonosVoice = patch.zonosVoice.trim().slice(0, 120);
   if (patch.defaultAutoSpeak !== undefined) state.defaultAutoSpeak = Boolean(patch.defaultAutoSpeak);
   if (patch.defaultContinuousFlow !== undefined) state.defaultContinuousFlow = Boolean(patch.defaultContinuousFlow);
   if (['standard', 'detailed'].includes(patch.avatarQuality)) state.avatarQuality = patch.avatarQuality;
+  if (patch.defaultExamMode !== undefined) state.defaultExamMode = Boolean(patch.defaultExamMode);
+  if (patch.showCaptions !== undefined) state.showCaptions = Boolean(patch.showCaptions);
+  if (patch.callAmbientAudio !== undefined) state.callAmbientAudio = Boolean(patch.callAmbientAudio);
+  if (['manual', 'ptt', 'handsfree'].includes(patch.micMode)) state.micMode = patch.micMode;
+  if (['spotlight', 'split'].includes(patch.defaultLayout)) state.defaultLayout = patch.defaultLayout;
+  if ([8, 12, 15, 25].includes(Number(patch.defaultDurationMinutes))) state.defaultDurationMinutes = Number(patch.defaultDurationMinutes);
 
-  if (patch.usePowerUp && state.powerUps[patch.usePowerUp] > 0) {
-    state.powerUps[patch.usePowerUp] -= 1;
+  if (patch.usePowerUp) {
+    const key = String(patch.usePowerUp);
+    if (!Object.hasOwn(state.powerUps, key)) return { status: 400, error: `Unknown Power-Up: ${key}` };
+    if ((state.powerUps[key] || 0) <= 0) return { status: 400, error: `No ${key} charges remaining.` };
+    state.powerUps[key] -= 1;
     state.xp += 10;
   }
   if (patch.buyPowerUp) {
@@ -146,6 +209,7 @@ function applyStatePatch(state, patch) {
       m.mastered = true;
       state.xp += 25;
       state.gems += 10;
+      return { masteredMistakeId: m.id };
     }
   }
   return null;
@@ -156,12 +220,14 @@ async function serveStaticAsset(pathname, res) {
   const baseDir = isShared ? SHARED_DIR : APP_DIR;
   const relPath = isShared ? pathname.replace(/^\/shared/, '') : pathname === '/' ? '/index.html' : pathname;
   const resolved = path.resolve(baseDir, `.${relPath}`);
-  if (!resolved.startsWith(baseDir)) {
+  const basePrefix = baseDir.endsWith(path.sep) ? baseDir : `${baseDir}${path.sep}`;
+  if (resolved !== baseDir && !resolved.startsWith(basePrefix)) {
     res.writeHead(403);
     res.end('Forbidden');
     return;
   }
-  if (!existsSync(resolved)) {
+  const st = await fs.stat(resolved).catch(() => null);
+  if (!st || !st.isFile()) {
     res.writeHead(404);
     res.end('Not Found');
     return;
@@ -173,6 +239,9 @@ async function serveStaticAsset(pathname, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  if (!isAllowedOrigin(req)) {
+    return sendJson(res, 403, { error: 'Forbidden host or cross-site origin' });
+  }
   const url = new URL(req.url || '/', `http://localhost:${PORT}`);
   const { pathname } = url;
   const method = req.method;
@@ -186,29 +255,36 @@ const server = http.createServer(async (req, res) => {
       const status = await getSetupStatus();
       if (status.ollamaRunning) return sendJson(res, 200, { started: true, alreadyRunning: true });
       if (!status.ollamaPath) return sendJson(res, 400, { error: 'Ollama CLI is not installed yet.' });
-      spawn(status.ollamaPath, ['serve'], { detached: true, stdio: 'ignore' }).unref();
+      const child = spawn(status.ollamaPath, ['serve'], { detached: true, stdio: 'ignore' });
+      child.on('error', () => {});
+      child.unref();
       await new Promise((r) => setTimeout(r, 1500));
       return sendJson(res, 200, { started: true, status: await getSetupStatus() });
     }
 
     if (pathname === '/api/ollama/pull' && method === 'POST') {
       const body = await readJsonBody(req);
-      let model = String(body.model || '').trim();
-      if (MODEL_ALIASES[model]) model = MODEL_ALIASES[model];
+      let model = resolveModelAlias(String(body.model || '').trim());
       if (!model || !/^[a-zA-Z0-9._:/-]+$/.test(model)) return sendJson(res, 400, { error: 'Invalid model name.' });
 
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableFinished) ac.abort(); });
       const pullRes = await fetch(`${OLLAMA_BASE}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: model, stream: true })
+        body: JSON.stringify({ name: model, stream: true }),
+        signal: ac.signal
       });
       if (!pullRes.ok) return sendJson(res, pullRes.status, { error: (await pullRes.text()) || `Ollama pull failed (${pullRes.status})` });
 
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
       res.flushHeaders();
       if (!pullRes.body) return res.end(JSON.stringify({ status: 'error', error: 'No pull stream from Ollama' }) + '\n');
-      for await (const chunk of pullRes.body) res.write(chunk);
-      return res.end();
+      for await (const chunk of pullRes.body) {
+        if (ac.signal.aborted || res.writableEnded || res.destroyed) break;
+        res.write(chunk);
+      }
+      return !res.writableEnded && !res.destroyed && res.end();
     }
 
     if (pathname === '/api/zonos/start' && method === 'POST') return sendJson(res, 200, await triggerZonosSetupOrStart());
@@ -216,7 +292,8 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/catalog' && method === 'GET') {
       const bundle = await buildCvResponseBundle();
-      const cheatsheetMd = await fs.readFile(path.join(ROOT_DIR, 'cheatsheets', 'anti-freeze-phrases-and-star-stories.md'), 'utf8');
+      const cheatsheetPath = path.join(ROOT_DIR, 'cheatsheets', 'anti-freeze-phrases-and-star-stories.md');
+      const cheatsheetMd = existsSync(cheatsheetPath) ? await fs.readFile(cheatsheetPath, 'utf8').catch(() => '') : '';
       return sendJson(res, 200, {
         needsOnboarding: bundle.needsOnboarding,
         agents: bundle.agents,
@@ -289,33 +366,37 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, await generateFakeJobForActiveCv(await readJsonBody(req)));
     }
     if (pathname === '/api/cv/upload-stream' && method === 'POST') {
-      const body = await readJsonBody(req);
-      return await streamNdjsonTask(res, (onProg) => analyzeCvAndBuildDailyPath(body, onProg));
+      const body = await readJsonBody(req, 15 * 1024 * 1024);
+      return await streamNdjsonTask(req, res, (onProg, signal) => analyzeCvAndBuildDailyPath(body, onProg, signal));
     }
 
     if (pathname === '/api/state') {
       if (method === 'GET') return sendJson(res, 200, await ensureState());
       if (method === 'POST') {
-        const state = await ensureState();
-        const err = applyStatePatch(state, await readJsonBody(req));
-        if (err) return sendJson(res, err.status, { error: err.error });
-        await saveState(state);
-        return sendJson(res, 200, state);
+        const patch = await readJsonBody(req);
+        const result = mutateStateSync((state) => {
+          const out = applyStatePatch(state, patch);
+          if (out?.status) return { abort: out };
+          return out || {};
+        });
+        if (result?.abort) return sendJson(res, result.abort.status, { error: result.abort.error });
+        return sendJson(res, 200, result.state);
       }
     }
 
-    if (pathname === '/api/chat' && method === 'POST') return sendJson(res, 200, await handleChat(await readJsonBody(req)));
-    if (pathname === '/api/chat/stream' && method === 'POST') return await handleChatStream(await readJsonBody(req), res);
+    if (pathname === '/api/chat' && method === 'POST') return sendJson(res, 200, await handleChat(await readJsonBody(req, 2 * 1024 * 1024)));
+    if (pathname === '/api/chat/stream' && method === 'POST') return await handleChatStream(await readJsonBody(req, 2 * 1024 * 1024), req, res);
 
     if (pathname === '/api/warmup' && method === 'POST') {
       const { model = 'qwen3.5:9b' } = await readJsonBody(req);
+      const resolvedModel = resolveModelAlias(model);
       fetch(`${OLLAMA_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [], keep_alive: '15m' })
+        body: JSON.stringify({ model: resolvedModel, messages: [], keep_alive: '15m' })
       }).catch(() => {});
       fetchZonosSpeakers(false).catch(() => {});
-      return sendJson(res, 200, { warming: model });
+      return sendJson(res, 200, { warming: resolvedModel });
     }
 
     if (pathname === '/api/tts' && method === 'POST') {
@@ -325,7 +406,8 @@ const server = http.createServer(async (req, res) => {
         try {
           const speech = await synthesizeZonosSpeech({ text, voice, prosody });
           if (speech) {
-            res.writeHead(200, { 'Content-Type': speech.contentType, 'X-TTS-Engine': 'zonos3-mini', 'X-TTS-Speaker': speech.speakerId });
+            const safeSpeaker = String(speech.speakerId || '').replace(/[^\x20-\x7E]/g, '').slice(0, 64) || 'default';
+            res.writeHead(200, { 'Content-Type': speech.contentType, 'X-TTS-Engine': 'zonos3-mini', 'X-TTS-Speaker': safeSpeaker });
             return res.end(speech.buffer);
           }
         } catch (err) {
@@ -336,9 +418,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/stt' && method === 'POST') {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const audioBuf = Buffer.concat(chunks);
+      const audioBuf = await readBodyBuffer(req, 25 * 1024 * 1024);
       if (audioBuf.length < 200) return sendJson(res, 400, { error: 'Empty audio payload' });
       try {
         return sendJson(res, 200, await transcribeAudioBuffer(audioBuf, req.headers['content-type']));
@@ -359,28 +439,32 @@ const server = http.createServer(async (req, res) => {
       if (method === 'DELETE') {
         const targetId = url.searchParams.get('id');
         if (!targetId) return sendJson(res, 400, { error: 'Missing id' });
-        const list = (await ensureCustomInterviews()).filter((c) => c.id !== targetId);
-        await saveCustomInterviews(list);
-        return sendJson(res, 200, { deleted: targetId, interviews: list });
+        deleteCustomInterviewSync(targetId);
+        return sendJson(res, 200, { deleted: targetId, interviews: await ensureCustomInterviews() });
       }
     }
-    if (pathname === '/api/jd/extract-image' && method === 'POST') return sendJson(res, 200, await extractJdFromImage(await readJsonBody(req)));
+    if (pathname === '/api/jd/extract-image' && method === 'POST') return sendJson(res, 200, await extractJdFromImage(await readJsonBody(req, 15 * 1024 * 1024)));
     if (pathname === '/api/custom-interviews/generate' && method === 'POST') {
-      const pack = await generateCustomInterviewPack(await readJsonBody(req));
+      const pack = await generateCustomInterviewPack(await readJsonBody(req, 2 * 1024 * 1024));
       return sendJson(res, 200, { pack, interviews: await ensureCustomInterviews() });
     }
     if (pathname === '/api/custom-interviews/generate-stream' && method === 'POST') {
-      const body = await readJsonBody(req);
-      return await streamNdjsonTask(res, async (onProg) => {
-        const pack = await generateCustomInterviewPack(body, onProg);
+      const body = await readJsonBody(req, 2 * 1024 * 1024);
+      return await streamNdjsonTask(req, res, async (onProg, signal) => {
+        const pack = await generateCustomInterviewPack(body, onProg, signal);
         return { pack, interviews: await ensureCustomInterviews() };
       });
     }
 
+    if (pathname.startsWith('/api/')) {
+      return sendJson(res, 404, { error: `Unknown API route or unsupported method (${method} ${pathname})` });
+    }
+
     await serveStaticAsset(pathname, res);
   } catch (err) {
-    if (!res.headersSent) sendJson(res, 500, { error: err.message });
-    else if (!res.writableEnded) res.end();
+    const code = err?.statusCode || 500;
+    if (!res.headersSent) sendJson(res, code, { error: err.message });
+    else if (!res.writableEnded && !res.destroyed) res.end();
   }
 });
 

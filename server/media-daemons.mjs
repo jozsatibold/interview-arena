@@ -23,6 +23,8 @@ let zonosSetupLogs = [];
 let zonosSetupStatus = 'idle'; // idle | running | done | error
 let zonosSpeakersCache = { fetchedAt: 0, speakers: [] };
 let whisperServerChild = null;
+let zonosStartPromise = null;
+let whisperStartPromise = null;
 
 function pushZonosLog(line) {
   const clean = String(line || '').trimEnd();
@@ -74,7 +76,7 @@ export async function resolveZonosSpeakerId(preferredVoice = 'AmericanFemale') {
   }
   const wantMale = /male/i.test(preferredVoice) && !/female/i.test(preferredVoice);
   const byGender = speakers.find((s) =>
-    wantMale ? /\bmale\b|_\bm\b| m 1$/i.test(`${s.label} ${s.original_name}`) : /female|_f_| f 1$/i.test(`${s.label} ${s.original_name}`)
+    wantMale ? /\bmale\b|_m_| m 1$/i.test(`${s.label} ${s.original_name}`) : /female|_f_| f 1$/i.test(`${s.label} ${s.original_name}`)
   );
   return byGender?.id || speakers[0].id;
 }
@@ -109,40 +111,50 @@ export async function isZonosAlive() {
 
 export async function startZonosIfBuilt() {
   if (await isZonosAlive()) return true;
-  const { bin, backbone, decoder, spkEncoder, voicesDir } = getZonosLaunchPaths();
-  if (!existsSync(bin) || !existsSync(backbone) || !existsSync(decoder)) return false;
-  if (zonosSetupChild && zonosSetupStatus === 'running') return false;
+  if (zonosStartPromise) return zonosStartPromise;
+  zonosStartPromise = (async () => {
+    const { bin, backbone, decoder, spkEncoder, voicesDir } = getZonosLaunchPaths();
+    if (!existsSync(bin) || !existsSync(backbone) || !existsSync(decoder)) return false;
 
-  const args = [backbone, '--zac', decoder, '--gpu', '--host', '127.0.0.1', '--port', '1919'];
-  if (existsSync(spkEncoder)) args.push('--spk-encoder', spkEncoder);
-  if (existsSync(voicesDir)) args.push('--tts-default-voices-dir', voicesDir);
+    const args = [backbone, '--zac', decoder, '--gpu', '--host', '127.0.0.1', '--port', '1919'];
+    if (existsSync(spkEncoder)) args.push('--spk-encoder', spkEncoder);
+    if (existsSync(voicesDir)) args.push('--tts-default-voices-dir', voicesDir);
 
-  zonosSetupLogs = ['Launching local ZONOS3-Mini Metal TTS server on :1919...'];
-  zonosSetupStatus = 'running';
-  const child = spawn(bin, args, {
-    cwd: path.join(ROOT_DIR, 'zonos3', 'servers', 'ggml'),
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  zonosSetupChild = child;
-  child.stdout?.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
-  child.stderr?.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
-  child.on('exit', (code) => {
-    pushZonosLog(`ZONOS3 server exited with code ${code}`);
-    zonosSetupStatus = code === 0 ? 'done' : 'error';
-    zonosSetupChild = null;
-  });
-  child.unref();
+    zonosSetupLogs = ['Launching local ZONOS3-Mini Metal TTS server on :1919...'];
+    zonosSetupStatus = 'running';
+    const child = spawn(bin, args, {
+      cwd: path.join(ROOT_DIR, 'zonos3', 'servers', 'ggml'),
+      detached: true,
+      stdio: 'ignore'
+    });
+    zonosSetupChild = child;
+    child.on('error', (err) => {
+      pushZonosLog(`ZONOS3 launch failed: ${err.message}`);
+      zonosSetupStatus = 'error';
+      zonosSetupChild = null;
+    });
+    child.on('exit', (code) => {
+      pushZonosLog(`ZONOS3 server exited with code ${code}`);
+      zonosSetupStatus = code === 0 ? 'done' : 'error';
+      zonosSetupChild = null;
+    });
+    child.unref();
 
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 400));
-    if (await isZonosAlive()) {
-      zonosSetupStatus = 'done';
-      pushZonosLog('ZONOS3-Mini ready on http://127.0.0.1:1919');
-      return true;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (await isZonosAlive()) {
+        zonosSetupStatus = 'done';
+        pushZonosLog('ZONOS3-Mini ready on http://127.0.0.1:1919');
+        return true;
+      }
+      if (zonosSetupStatus === 'error') return false;
     }
-  }
-  return false;
+    if (zonosSetupStatus === 'running') zonosSetupStatus = 'idle';
+    return false;
+  })().finally(() => {
+    zonosStartPromise = null;
+  });
+  return zonosStartPromise;
 }
 
 export async function triggerZonosSetupOrStart() {
@@ -163,8 +175,13 @@ export async function triggerZonosSetupOrStart() {
       env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` }
     });
     zonosSetupChild = child;
-    child.stdout.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
-    child.stderr.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
+    child.on('error', (err) => {
+      pushZonosLog(`Setup launch error: ${err.message}`);
+      zonosSetupStatus = 'error';
+      zonosSetupChild = null;
+    });
+    child.stdout?.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
+    child.stderr?.on('data', (d) => d.toString().split('\n').forEach(pushZonosLog));
     child.on('exit', (code) => {
       pushZonosLog(`Process exited with code ${code}`);
       zonosSetupStatus = code === 0 ? 'done' : 'error';
@@ -229,31 +246,42 @@ export async function isWhisperAlive() {
 
 export async function startWhisperIfPresent() {
   if (await isWhisperAlive()) return true;
-  if (whisperServerChild) return false;
-  const bin =
-    (await commandExists('whisper-server')) ||
-    (existsSync('/opt/homebrew/bin/whisper-server') ? '/opt/homebrew/bin/whisper-server' : null);
-  if (!bin || !existsSync(WHISPER_MODEL)) return false;
+  if (whisperStartPromise) return whisperStartPromise;
+  whisperStartPromise = (async () => {
+    const bin =
+      (await commandExists('whisper-server')) ||
+      (existsSync('/opt/homebrew/bin/whisper-server') ? '/opt/homebrew/bin/whisper-server' : null);
+    if (!bin || !existsSync(WHISPER_MODEL)) return false;
 
-  const args = [
-    '-m', WHISPER_MODEL,
-    '-l', 'en',
-    '--host', '127.0.0.1',
-    '--port', '1818',
-    '--convert',
-    '--prompt', WHISPER_TECH_PROMPT,
-    '--carry-initial-prompt'
-  ];
-  const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
-  whisperServerChild = child;
-  child.on('exit', () => { whisperServerChild = null; });
-  child.unref();
+    const args = [
+      '-m', WHISPER_MODEL,
+      '-l', 'en',
+      '--host', '127.0.0.1',
+      '--port', '1818',
+      '--convert',
+      '--prompt', WHISPER_TECH_PROMPT,
+      '--carry-initial-prompt'
+    ];
+    let failed = false;
+    const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+    whisperServerChild = child;
+    child.on('error', () => {
+      failed = true;
+      whisperServerChild = null;
+    });
+    child.on('exit', () => { whisperServerChild = null; });
+    child.unref();
 
-  for (let i = 0; i < 25; i++) {
-    await new Promise((r) => setTimeout(r, 400));
-    if (await isWhisperAlive()) return true;
-  }
-  return false;
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (failed) return false;
+      if (await isWhisperAlive()) return true;
+    }
+    return false;
+  })().finally(() => {
+    whisperStartPromise = null;
+  });
+  return whisperStartPromise;
 }
 
 export async function transcribeAudioBuffer(audioBuf, contentTypeHeader = 'audio/webm') {

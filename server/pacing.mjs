@@ -58,6 +58,8 @@ export function buildInterviewPacingDirectives({
   action = 'turn',
   topic = 'HR',
   userTurns = 0,
+  elapsedSeconds = null,
+  targetDurationSeconds = null,
   firstName = 'there',
   avatarName = 'the interviewer',
   companyName = '',
@@ -66,7 +68,16 @@ export function buildInterviewPacingDirectives({
   compactMode = false
 }) {
   const isStart = action === 'start' || userTurns === 0;
-  const phase = isStart ? 'warmup' : userTurns === 1 ? 'intro' : userTurns <= 3 ? 'explore' : 'closing';
+  const hasClock = Number.isFinite(Number(targetDurationSeconds)) && Number(targetDurationSeconds) > 0 && Number.isFinite(Number(elapsedSeconds));
+  const remainingSec = hasClock ? Math.max(0, Number(targetDurationSeconds) - Number(elapsedSeconds)) : null;
+
+  let phase = 'explore';
+  if (isStart) phase = 'warmup';
+  else if (userTurns === 1) phase = 'intro';
+  else if ((remainingSec !== null && remainingSec <= 45) || userTurns >= 8) phase = 'closing';
+  else if ((remainingSec !== null && remainingSec <= 150) || userTurns === 7) phase = 'reverse_qa';
+  else if (userTurns <= 6) phase = 'explore';
+
   const moodDesc = personality?.mood ? ` (${personality.mood})` : '';
   const hintClean = String(openerHint || '').trim();
   const speakerIdentity = companyName ? `${avatarName} from ${companyName}` : avatarName;
@@ -128,17 +139,49 @@ CRITICAL: Do NOT ask a CV-specific, technical, overlapping-dates, or compensatio
     return { phase, pacingBlock, startPrompt: '' };
   }
 
+  if (phase === 'reverse_qa') {
+    const scopeReminder =
+      topic === 'HR'
+        ? 'Answer ONLY HR/culture/team-process questions (if they ask deep technical trivia, note an engineer can cover it in the next round).'
+        : `Keep your answers strictly within your ${topic} authority.`;
+    const pacingBlock = compactMode
+      ? `STAGE 3A (Reverse Q&A — ~2 min left): React briefly to their answer, mention we have ~2 minutes left, and invite ${firstName} to ask YOU questions about the role/team (or answer their question cleanly within ${topic} scope).`
+      : `CONVERSATION PHASE 3A — REVERSE Q&A ("WHAT QUESTIONS DO YOU HAVE FOR ME?"):
+- React naturally and concisely to ${firstName}'s previous answer.
+- If you haven't invited their questions yet, notice the time naturally ("We have about two minutes left before we wrap up—what questions do you have for me about the team or role?").
+- If ${firstName} just asked YOU a question, give a grounded, candid, realistic answer inside your role (${scopeReminder}) and check if they have one final quick question.`;
+    return { phase, pacingBlock, startPrompt: '' };
+  }
+
   const logisticsNote =
     topic === 'HR' || topic === 'Negotiation'
-      ? 'If practical details (remote logistics, notice period, availability, or target compensation range) have not been covered yet, introduce them smoothly now as practical alignment ("Since we are getting close to wrapping up, I would love to quickly align on practical logistics...").'
-      : 'Briefly tie together one key takeaway from what they shared and smoothly ask one closing angle or invite one question from them before wrapping up.';
+      ? 'If practical details (remote logistics, notice period, availability, or target compensation range) have not been covered yet, confirm them smoothly and thank them for their time.'
+      : 'Briefly tie together one key takeaway from what they shared, thank them warmly for their questions and perspective, and explain next steps.';
 
   const pacingBlock = compactMode
-    ? `STAGE 3 (Wrap-Up): React briefly to their answer, smoothly signal closing ("Before we wrap up today..."), and cover final logistics or invite 1 question.`
-    : `CONVERSATION PHASE 3 — SMOOTH LATE-STAGE TRANSITION & WRAP-UP:
-- React concisely to ${firstName}'s previous answer, then signpost cleanly that you are moving toward final alignment ("Before we start wrapping up...", "On a slightly more practical note as we round out the call...").
+    ? `STAGE 4 (Wrap-Up): React briefly to ${firstName}'s last question/point, thank them warmly, and state realistic next steps.`
+    : `CONVERSATION PHASE 4 — SMOOTH FINAL WRAP-UP:
+- Respond concisely to ${firstName}'s last point/question, then transition cleanly into closing ("That wraps up everything on my side today—thank you so much for your time...").
 - ${logisticsNote}`;
   return { phase, pacingBlock, startPrompt: '' };
+}
+
+export function buildTurnContextAddendum({ interrupted = false, screenShareArtifact = null, highlightedLines = [], artifactNotes = '' } = {}) {
+  const parts = [];
+  if (interrupted) {
+    parts.push('CALL EVENT (CANDIDATE BARGE-IN): The candidate jumped in while you were speaking. Acknowledge their point smoothly in 2-5 words without repeating your cut-off sentence verbatim.');
+  }
+  if (screenShareArtifact) {
+    const numbered = screenShareArtifact.lines.map((l, idx) => `${idx + 1}: ${l}`).join('\n');
+    const hi = Array.isArray(highlightedLines) && highlightedLines.length
+      ? `\nCandidate highlighted line(s): ${highlightedLines.join(', ')}`
+      : '';
+    const notes = String(artifactNotes || '').trim()
+      ? `\nCandidate scratch notes on screen share: "${String(artifactNotes).trim().slice(0, 400)}"`
+      : '';
+    parts.push(`=== SHARED SCREEN ARTIFACT (${screenShareArtifact.kind}: ${screenShareArtifact.title}) ===\n${numbered}${hi}${notes}\nUse this shared screen naturally when discussing code, bottlenecks, or trade-offs.`);
+  }
+  return parts.length ? `\n\n${parts.join('\n\n')}` : '';
 }
 
 /**
@@ -173,6 +216,7 @@ export function buildInterviewPrompt({
   personalityBlock = '',
   pacing,
   earlierSummary = '',
+  addendum = '',
   agentPrompt = '',
   jdPrompt = '',
   delimiter = '---COACH_JSON---',
@@ -207,7 +251,7 @@ export function buildInterviewPrompt({
     ? `${identityHeader}
 ${boundaryRule}
 ${personalityBlock}
-${pacing.pacingBlock}${summaryLine}
+${pacing.pacingBlock}${summaryLine}${addendum}
 Role Focus: ${agentPrompt}
 Target JD (reference role context ONLY — obey ${topic} authority above): ${jdPrompt}
 === CANDIDATE CV (their PAST employers, NOT yours) ===
@@ -223,7 +267,7 @@ ${compactFlowRule}${action === 'turn' && retryOf?.better ? `\nRETRY: Acknowledge
     : `${identityHeader}
 ${boundaryRule}
 ${personalityBlock}
-${pacing.pacingBlock}${summaryLine}
+${pacing.pacingBlock}${summaryLine}${addendum}
 ${agentPrompt}
 Target Role Context: ${jdPrompt}
 === CANDIDATE BACKGROUND (their PAST employers, NOT yours) ===

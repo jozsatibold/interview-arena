@@ -433,5 +433,5 @@ export function getPublicLogicPuzzles(extraPuzzles = []) {
 }
 
 export function findLogicPuzzle(id, extraPuzzles = []) {
-  return [...(extraPuzzles || []), ...CURATED_LOGIC_PUZZLES].find((p) => p.id === id) || CURATED_LOGIC_PUZZLES[0];
+  return [...(extraPuzzles || []), ...CURATED_LOGIC_PUZZLES].find((p) => p.id === id) || null;
 }

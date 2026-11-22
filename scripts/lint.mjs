@@ -7,26 +7,27 @@ import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const JS_DIRS = ['.', 'server', 'shared', 'app', 'app/modules', 'scripts', 'tests'];
-const IGNORE_DIRS = new Set(['data', 'zonos3', 'node_modules', '.git', '.agents']);
+const IGNORE_DIRS = new Set(['data', 'zonos3', 'node_modules', '.git', '.agents', 'assets']);
+
+async function walkDir(absDir, out) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(absDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of entries) {
+    if (ent.isDirectory()) {
+      if (!IGNORE_DIRS.has(ent.name)) await walkDir(path.join(absDir, ent.name), out);
+    } else if (ent.isFile() && /\.(mjs|js)$/.test(ent.name)) {
+      out.push(path.join(absDir, ent.name));
+    }
+  }
+}
 
 async function collectJsFiles() {
   const files = [];
-  for (const relDir of JS_DIRS) {
-    const absDir = path.join(ROOT, relDir);
-    let entries = [];
-    try {
-      entries = await fs.readdir(absDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const ent of entries) {
-      if (ent.isDirectory() && IGNORE_DIRS.has(ent.name)) continue;
-      if (ent.isFile() && /\.(mjs|js)$/.test(ent.name)) {
-        files.push(path.join(absDir, ent.name));
-      }
-    }
-  }
+  await walkDir(ROOT, files);
   return files.sort();
 }
 
@@ -60,8 +61,8 @@ async function main() {
       if (/\beval\s*\(|new\s+Function\s*\(/.test(src)) {
         errors.push(`[SECURITY] ${rel}: Avoid eval() or new Function()`);
       }
-      if (/from\s+['"]node:child_process['"]/.test(src) && /\bexec\s*\(/.test(src)) {
-        errors.push(`[SECURITY] ${rel}: Use execFile/spawn with argument arrays instead of shell-interpolated exec()`);
+      if (/from\s+['"]node:child_process['"]/.test(src) && /\b(exec|execSync)\s*\(/.test(src)) {
+        errors.push(`[SECURITY] ${rel}: Use execFile/spawn with argument arrays instead of shell-interpolated exec()/execSync()`);
       }
       if (/db\.(prepare|exec)\s*\(\s*`[^`]*\$\{/.test(src)) {
         errors.push(`[SECURITY] ${rel}: Possible SQL template interpolation; use parameterized '?' queries`);
@@ -72,9 +73,10 @@ async function main() {
     }
 
     // 4. Server-to-client secret leak check for logic puzzles
-    if (rel === 'logic-puzzles.mjs' || rel === 'server/chat-service.mjs') {
-      if (rel === 'logic-puzzles.mjs' && /sanitizeLogicPuzzleForClient[\s\S]*solutionGuide/.test(src)) {
-        errors.push(`[SECURITY] ${rel}: solutionGuide must never appear in sanitizeLogicPuzzleForClient()`);
+    if (rel === 'logic-puzzles.mjs') {
+      const fnMatch = src.match(/function sanitizeLogicPuzzleForClient[\s\S]*?\n\}/);
+      if (fnMatch && (/solutionGuide/.test(fnMatch[0]) || /\.\.\./.test(fnMatch[0]))) {
+        errors.push(`[SECURITY] ${rel}: sanitizeLogicPuzzleForClient() must use an explicit allowlist without solutionGuide or object spread`);
       }
     }
 

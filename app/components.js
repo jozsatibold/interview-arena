@@ -43,17 +43,22 @@ export async function consumeNdjsonStream(response, onObj) {
     onObj(obj);
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() || '';
-    for (const line of lines) flushLine(line);
-  }
-  buf += decoder.decode();
-  if (buf.trim()) {
-    for (const line of buf.split('\n')) flushLine(line);
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) flushLine(line);
+    }
+    buf += decoder.decode();
+    if (buf.trim()) {
+      for (const line of buf.split('\n')) flushLine(line);
+    }
+  } finally {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
   }
 }
 
@@ -78,15 +83,19 @@ export function fillSelectOptions(
     }
     return;
   }
+  let matched = false;
   for (const item of items) {
     const opt = document.createElement('option');
     const val = String(getValue(item) ?? '');
     opt.value = val;
     opt.textContent = String(getLabel(item) ?? val);
-    if (selectedValue && String(selectedValue) === val) opt.selected = true;
+    if (selectedValue && String(selectedValue) === val) {
+      opt.selected = true;
+      matched = true;
+    }
     selectEl.appendChild(opt);
   }
-  if (selectedValue) selectEl.value = String(selectedValue);
+  if (matched) selectEl.value = String(selectedValue);
 }
 
 function moveNodes(fromEl, toEl, filterFn = null) {
@@ -120,7 +129,7 @@ class IntButton extends HTMLElement {
       this.removeAttribute('hidden');
     }
     for (const attr of this.attributes) {
-      if (attr.name.startsWith('data-')) btn.setAttribute(attr.name, attr.value);
+      if (attr.name.startsWith('data-') && attr.name !== 'data-ready') btn.setAttribute(attr.name, attr.value);
     }
 
     const label = this.getAttribute('label');
@@ -151,7 +160,7 @@ function buildFieldShell(host, tagName) {
     const label = document.createElement('label');
     label.className = 'field-label';
     label.setAttribute('for', controlId);
-    label.innerHTML = labelText;
+    label.textContent = labelText;
     wrap.appendChild(label);
   }
 

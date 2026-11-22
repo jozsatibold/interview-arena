@@ -448,7 +448,7 @@ export const FIXED_TUTOR_PERSONALITY = {
     skepticism: 'collaborative-trust',
     energy: 'pleasant-steady',
     focusLens: 'team-collaboration',
-    feedbackStyle: 'warm-affirming',
+    feedbackStyle: 'brief-affirming',
     adaptability: 'organic-conversational',
     humor: 'lighthearted-playful'
   },
@@ -469,7 +469,7 @@ export const FIXED_LOGIC_PERSONALITY = {
   traits: {
     patience: 'balanced-pace',
     warmth: 'polite-collegial',
-    probingDepth: 'curious-reasoning',
+    probingDepth: 'curious-why',
     formality: 'relaxed-professional',
     pacing: 'natural-steady',
     skepticism: 'constructive-tester',
@@ -583,7 +583,7 @@ const PRESET_TRAITS_BY_TOPIC = {
         skepticism: 'collaborative-trust',
         energy: 'upbeat-lively',
         focusLens: 'team-collaboration',
-        feedbackStyle: 'warm-affirming',
+        feedbackStyle: 'brief-affirming',
         adaptability: 'organic-conversational',
         humor: 'lighthearted-playful'
       }
@@ -633,7 +633,7 @@ const PRESET_TRAITS_BY_TOPIC = {
       traits: {
         patience: 'calm-listener',
         warmth: 'friendly-open',
-        probingDepth: 'curious-reasoning',
+        probingDepth: 'curious-why',
         formality: 'relaxed-professional',
         pacing: 'unhurried-reflective',
         skepticism: 'constructive-tester',
@@ -671,7 +671,7 @@ const PRESET_TRAITS_BY_TOPIC = {
       traits: {
         patience: 'calm-listener',
         warmth: 'friendly-open',
-        probingDepth: 'curious-reasoning',
+        probingDepth: 'curious-why',
         formality: 'casual-conversational',
         pacing: 'natural-steady',
         skepticism: 'constructive-tester',
@@ -729,7 +729,7 @@ const PRESET_TRAITS_BY_TOPIC = {
       traits: {
         patience: 'calm-listener',
         warmth: 'polite-collegial',
-        probingDepth: 'curious-reasoning',
+        probingDepth: 'curious-why',
         formality: 'relaxed-professional',
         pacing: 'purposeful-smooth',
         skepticism: 'gentle-devils-advocate',
@@ -773,14 +773,14 @@ export const PERSONALITIES_BY_TOPIC = Object.fromEntries(
 /**
  * Cycle a single trait dimension to its next option (useful in Lobby UI).
  */
-export function cyclePersonalityTrait(currentPersonality, dimKey) {
+export function cyclePersonalityTrait(currentPersonality, dimKey, topic = 'HR') {
   const dim = DIMENSION_MAP.get(dimKey);
   if (!dim) return currentPersonality;
   const currentId = currentPersonality?.traits?.[dimKey];
   const idx = dim.options.findIndex((o) => o.id === currentId);
   const nextOpt = dim.options[(idx + 1) % dim.options.length];
   const nextTraits = { ...(currentPersonality?.traits || {}), [dimKey]: nextOpt.id };
-  return buildPersonalityFromTraits('HR', nextTraits, { id: 'rolled-10d' });
+  return buildPersonalityFromTraits(topic, nextTraits, { id: 'rolled-10d' });
 }
 
 /**

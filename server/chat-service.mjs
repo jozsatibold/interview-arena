@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
   pickPersonality,
   FIXED_TUTOR_PERSONALITY,
@@ -9,11 +10,13 @@ import {
 import {
   stripStaticOpenerSection,
   buildInterviewPacingDirectives,
+  buildTurnContextAddendum,
   trimConversationForTier,
   buildInterviewPrompt,
   TUTOR_PACING_RULE,
   LOGIC_PACING_RULE
 } from './pacing.mjs';
+import { findArtifactById, isScreenShareAllowedTopic } from '../shared/interview-artifacts.mjs';
 import { resolveEffectiveContextTier } from '../shared/model-tiers.mjs';
 import { getAdaptedAgents, buildDynamicAgentDirective } from '../role-adapter.mjs';
 import {
@@ -31,12 +34,11 @@ import {
   ROOT_DIR,
   AGENT_META,
   COMPACT_CANDIDATE_PROFILE,
-  TUTOR_CATALOG,
-  TUTOR_ROTATION_ANGLES
+  TUTOR_CATALOG
 } from './config.mjs';
 import {
   ensureState,
-  saveState,
+  mutateStateSync,
   getActiveCv,
   getStudentMemorySync,
   saveStudentMemorySync,
@@ -50,13 +52,26 @@ import {
   consumeNdjsonBody,
   stripThinkBlocks,
   extractJsonSafe,
+  parseJsonObjectStrict,
   findCoachMarker,
   summarizeMdPrompt
 } from './ollama.mjs';
 import { resolveTargetContext } from './document-service.mjs';
+import {
+  pickFreshTutorAngle,
+  buildStudentMemoryBrief,
+  scheduleStudentMemoryUpdate
+} from './tutor-memory.mjs';
 
-let memoryUpdateInFlight = false;
 const transientLogicPuzzles = new Map();
+
+function rememberTransientPuzzle(puzzle) {
+  if (transientLogicPuzzles.size >= 50) {
+    const oldestKey = transientLogicPuzzles.keys().next().value;
+    if (oldestKey) transientLogicPuzzles.delete(oldestKey);
+  }
+  transientLogicPuzzles.set(puzzle.id, puzzle);
+}
 
 export function resolveLogicPuzzleById(id) {
   if (id && transientLogicPuzzles.has(id)) return transientLogicPuzzles.get(id);
@@ -71,8 +86,15 @@ export function listPublicLogicPuzzles(includeTransient = false) {
 
 export function getLogicPuzzleHint(id, step = 0) {
   const puzzle = resolveLogicPuzzleById(id);
-  const hints = Array.isArray(puzzle?.hints) ? puzzle.hints : [];
-  const idx = Math.max(0, Math.min(hints.length - 1, Number(step || 0)));
+  if (!puzzle) {
+    const err = new Error(`Logic puzzle not found: ${id}`);
+    err.statusCode = 404;
+    throw err;
+  }
+  const hints = Array.isArray(puzzle.hints) ? puzzle.hints : [];
+  const rawStep = Number(step);
+  const safeStep = Number.isFinite(rawStep) ? rawStep : 0;
+  const idx = Math.max(0, Math.min(Math.max(0, hints.length - 1), Math.floor(safeStep)));
   return {
     hint: hints[idx] || 'Break the problem down into explicit cases or invariants on your scratchpad.',
     index: idx,
@@ -119,13 +141,13 @@ Return ONE valid JSON object ONLY (no markdown fences):
     45000
   );
   const data = await res.json();
-  const parsed = extractJsonSafe(data?.message?.content || '');
+  const parsed = parseJsonObjectStrict(data?.message?.content || '');
   if (!parsed?.title || !parsed?.prompt) {
     throw new Error('Could not generate a valid logic puzzle from the selected model. Please try again.');
   }
 
   const puzzle = {
-    id: `lp-ai-${Date.now()}`,
+    id: `lp-ai-${crypto.randomUUID()}`,
     difficulty: diffMeta.id,
     durationMinutes: diffMeta.minutes,
     category: chosenCat,
@@ -140,7 +162,7 @@ Return ONE valid JSON object ONLY (no markdown fences):
     createdAt: new Date().toISOString()
   };
 
-  if (guestMode) transientLogicPuzzles.set(puzzle.id, puzzle);
+  if (guestMode) rememberTransientPuzzle(puzzle);
   else saveCustomLogicPuzzleSync(puzzle);
 
   return sanitizeLogicPuzzleForClient(puzzle);
@@ -153,110 +175,116 @@ function updateStreak(state) {
     state.streak = 1;
   } else {
     const diffDays = Math.round((new Date(today) - new Date(state.lastPracticeDate)) / 86400000);
+    if (diffDays <= 0) return;
     if (diffDays === 1) {
       state.streak += 1;
-    } else if (diffDays > 1 && state.streakFreezes > 0) {
-      state.streakFreezes -= 1;
-      state.streak += 1;
     } else {
-      state.streak = 1;
+      const missedDays = diffDays - 1;
+      if (missedDays <= Number(state.streakFreezes || 0)) {
+        state.streakFreezes -= missedDays;
+        state.streak += 1;
+      } else {
+        state.streak = 1;
+      }
     }
   }
   state.lastPracticeDate = today;
 }
 
-async function appendProgressLog(scorecard, agentMeta, jdId) {
+async function appendProgressLog(scorecard, agentLabel, jdLabel) {
   const logPath = path.join(ROOT_DIR, 'progress-log.md');
   if (!existsSync(logPath) || !scorecard) return;
   const date = new Date().toISOString().slice(0, 10);
   const s = scorecard.subScores || {};
-  const row = `| ${date} | ${agentMeta?.code || 'Custom'} (${agentMeta?.topic || 'General'}) | \`${jdId || 'custom'}\` | ${s.english ?? '-'}/10 | ${s.analysis ?? '-'}/10 | ${s.techRoi ?? '-'}/10 | ${s.confidence ?? '-'}/10 | **${scorecard.totalScore}/10** | ${scorecard.percentile} (\`${scorecard.verdict}\`) | ${(scorecard.goldenSentences?.[0] || '').replaceAll('|', '/')} |\n`;
+  const cleanGolden = String(scorecard.goldenSentences?.[0] || '').replace(/[\r\n]+/g, ' ').replaceAll('|', '/').trim();
+  const row = `| ${date} | ${String(agentLabel || 'Custom').replace(/[\r\n|]+/g, ' ')} | \`${String(jdLabel || 'custom').replace(/[\r\n`]+/g, '')}\` | ${s.english ?? '-'}/10 | ${s.analysis ?? '-'}/10 | ${s.techRoi ?? '-'}/10 | ${s.confidence ?? '-'}/10 | **${scorecard.totalScore}/10** | ${scorecard.percentile} (\`${scorecard.verdict}\`) | ${cleanGolden} |\n`;
   await fs.appendFile(logPath, row, 'utf8');
 }
 
-function recordMistakeItem(state, { category, original, better, reason, topic }) {
-  const cleanOrig = String(original || '').trim();
-  const cleanBetter = String(better || '').trim();
-  if (!cleanOrig || !cleanBetter || cleanOrig.toLowerCase() === cleanBetter.toLowerCase()) return;
-
-  const existing = state.mistakes.find((m) => m.original.toLowerCase() === cleanOrig.toLowerCase());
+export async function persistChatSideEffects(parsed, { mode = 'interview', action, topic, agentFile, jdFile, day, isRetryPractice = false, doubleXpActive = false, speechMetrics = null }) {
   const today = new Date().toISOString().slice(0, 10);
-  if (existing) {
-    existing.count += 1;
-    existing.mastered = false;
-    existing.lastSeen = today;
-  } else {
-    state.mistakes.unshift({
-      id: `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+  const pendingMistakes = [];
+  const queueMistake = ({ category, original, better, reason }) => {
+    const cleanOrig = String(original || '').trim();
+    const cleanBetter = String(better || '').trim();
+    if (!cleanOrig || !cleanBetter || cleanOrig.toLowerCase() === cleanBetter.toLowerCase()) return;
+    pendingMistakes.push({
+      id: `m-${crypto.randomUUID()}`,
       category: category || 'Grammar',
       original: cleanOrig,
       better: cleanBetter,
       reasonHu: String(reason || '').trim(),
-      count: 1,
-      mastered: false,
       topic: topic || 'General',
       lastSeen: today
     });
-  }
-}
-
-export async function persistChatSideEffects(parsed, { model, action, topic, agentFile, jdFile, day, isRetryPractice = false, doubleXpActive = false }) {
-  const state = await ensureState();
-  state.selectedModel = model;
+  };
 
   if (parsed.coachPause?.original) {
-    recordMistakeItem(state, {
+    queueMistake({
       category: parsed.coachPause.category || 'B2-to-Senior',
       original: parsed.coachPause.original,
       better: parsed.coachPause.seniorUpgrades?.[0] || '',
-      reason: parsed.coachPause.reasonHu || parsed.coachPause.reason || '',
-      topic
+      reason: parsed.coachPause.reasonHu || parsed.coachPause.reason || ''
     });
   }
   if (Array.isArray(parsed.grammarFixes)) {
     for (const fix of parsed.grammarFixes) {
-      recordMistakeItem(state, {
-        category: fix.type || 'Grammar',
-        original: fix.said,
-        better: fix.better,
-        reason: fix.why || '',
-        topic
-      });
+      queueMistake({ category: fix.type || 'Grammar', original: fix.said, better: fix.better, reason: fix.why || '' });
     }
   }
 
   const xpMult = doubleXpActive ? 2 : 1;
   let xpEarned = action === 'turn' ? (isRetryPractice ? 25 : 15) * xpMult : 0;
-  if (parsed.scorecard && typeof parsed.scorecard.totalScore === 'number') {
-    updateStreak(state);
-    xpEarned = Math.round(50 + parsed.scorecard.totalScore * 10) * xpMult;
-    state.xp += xpEarned;
-    state.gems += parsed.scorecard.totalScore >= 8 ? 30 : 15;
-    if (day && !state.completedDays.includes(Number(day))) state.completedDays.push(Number(day));
-    state.sessions.push({
-      id: `s-${Date.now()}`,
-      date: new Date().toISOString().slice(0, 10),
+  let clampedScorecard = null;
+  let newSession = null;
+
+  const rawScore = Number(parsed?.scorecard?.totalScore);
+  if (parsed?.scorecard && Number.isFinite(rawScore)) {
+    const totalScore = Math.max(1, Math.min(10, Math.round(rawScore * 10) / 10));
+    clampedScorecard = { ...parsed.scorecard, totalScore };
+    parsed.scorecard.totalScore = totalScore;
+    xpEarned = Math.round(50 + totalScore * 10) * xpMult;
+    newSession = {
+      id: `s-${crypto.randomUUID()}`,
+      date: today,
       topic,
-      agentFile,
-      jdFile,
-      day: day ? Number(day) : null,
+      agentFile: agentFile || null,
+      jdFile: jdFile || null,
+      day: day != null && Number.isFinite(Number(day)) ? Number(day) : null,
       subScores: parsed.scorecard.subScores || { english: 7, analysis: 7, techRoi: 7, confidence: 7 },
-      totalScore: parsed.scorecard.totalScore,
+      totalScore,
       percentile: parsed.scorecard.percentile || 'Top 15%',
-      verdict: parsed.scorecard.verdict || 'LEAN HIRE'
-    });
-    const meta = AGENT_META.find((a) => a.id === agentFile);
-    await appendProgressLog(parsed.scorecard, meta, jdFile);
-  } else if (action === 'turn') {
-    state.xp += xpEarned;
-    updateStreak(state);
+      verdict: parsed.scorecard.verdict || 'LEAN HIRE',
+      speechMetrics: speechMetrics && typeof speechMetrics === 'object' ? speechMetrics : null
+    };
   }
 
-  await saveState(state);
+  const { state } = mutateStateSync((st) => {
+    if (newSession) {
+      updateStreak(st);
+      st.xp = Number(st.xp || 0) + xpEarned;
+      st.gems = Number(st.gems || 0) + (newSession.totalScore >= 8 ? 30 : 15);
+      if (day != null && Number.isFinite(Number(day)) && !st.completedDays.includes(Number(day))) {
+        st.completedDays.push(Number(day));
+      }
+      return { newSession, upsertMistakes: pendingMistakes };
+    }
+    if (action === 'turn') {
+      st.xp = Number(st.xp || 0) + xpEarned;
+      updateStreak(st);
+    }
+    return { upsertMistakes: pendingMistakes };
+  });
+
+  if (clampedScorecard) {
+    const meta = mode === 'interview' ? AGENT_META.find((a) => a.id === agentFile) : null;
+    const agentLabel = meta ? `${meta.code} (${meta.topic})` : `${agentFile || mode} (${topic})`;
+    await appendProgressLog(clampedScorecard, agentLabel, jdFile || topic);
+  }
   return { xpEarned, state };
 }
 
-function extractCoachMeta(parsedMeta) {
+export function extractCoachMeta(parsedMeta) {
   const rawFixes = Array.isArray(parsedMeta?.grammarFixes) ? parsedMeta.grammarFixes : [];
   const grammarFixes = rawFixes
     .filter((f) => f && f.said && f.better)
@@ -268,130 +296,18 @@ function extractCoachMeta(parsedMeta) {
       why: String(f.why || '').trim()
     }));
   const scratchpadPin = parsedMeta?.scratchpadPin ? String(parsedMeta.scratchpadPin).trim().slice(0, 480) : null;
+  const rawPause = parsedMeta?.coachPause;
+  const coachPause =
+    rawPause && typeof rawPause === 'object' && !Array.isArray(rawPause) && typeof rawPause.original === 'string' && rawPause.original.trim()
+      ? rawPause
+      : null;
   return {
     expression: normalizeExpression(parsedMeta?.expression),
-    coachPause: parsedMeta?.coachPause || null,
-    microTipHu: parsedMeta?.microTipHu || null,
+    coachPause,
+    microTipHu: typeof parsedMeta?.microTipHu === 'string' ? parsedMeta.microTipHu : null,
     grammarFixes,
     scratchpadPin: scratchpadPin && scratchpadPin.toLowerCase() !== 'null' ? scratchpadPin : null
   };
-}
-
-function pickFreshTutorAngle(mem) {
-  const recent = new Set((mem.recentAngles || []).map((a) => String(a).toLowerCase()));
-  const pool = TUTOR_ROTATION_ANGLES.filter((a) => !recent.has(a.toLowerCase()));
-  const list = pool.length ? pool : TUTOR_ROTATION_ANGLES;
-  return list[Math.floor(Math.random() * list.length)];
-}
-
-function buildStudentMemoryBrief(mem, freshAngle = '') {
-  if (!mem) return '';
-  const cm = mem.cognitiveMap || {};
-  const parts = [];
-  if (cm.thinkingStyle || cm.explanationPreference || cm.summary) {
-    parts.push(`Thinking & Explanation Map: ${cm.thinkingStyle || ''}. Explanations click best via: ${cm.explanationPreference || 'concrete analogies'}. ${cm.summary || ''}`);
-  }
-  if (Array.isArray(mem.hobbies) && mem.hobbies.length) parts.push(`Known Interests/Hobbies (use gently as analogies): ${mem.hobbies.join(', ')}`);
-  if (Array.isArray(mem.facts) && mem.facts.length) parts.push(`Key Personal Notes: ${mem.facts.slice(-6).join(' | ')}`);
-  if (Array.isArray(mem.topicScores) && mem.topicScores.length) {
-    const topScores = [...mem.topicScores]
-      .sort((a, b) => b.engagement - a.engagement)
-      .slice(0, 6)
-      .map((t) => `${t.topic} (interest:${t.engagement}/10, fluency:${t.fluency}/10)`);
-    parts.push(`Topic History: ${topScores.join(' | ')}`);
-  }
-  if (freshAngle) parts.push(`TODAY'S FRESH TOPIC ROTATION (must keep conversation diverse and interesting, touch adjacent subjects beyond past topics): ${freshAngle}`);
-  return parts.length ? `\nSTUDENT LEARNING & THINKING MAP (subtle guidance — never recite mechanically):\n${parts.join('\n')}` : '';
-}
-
-function scheduleStudentMemoryUpdate({ model, messages, topicLabel }) {
-  if (memoryUpdateInFlight || !Array.isArray(messages) || messages.length < 2) return;
-  const recentTurns = messages.slice(-6).map((m) => `${m.role === 'user' ? 'Student' : 'Tutor'}: ${m.content}`).join('\n');
-  const current = getStudentMemorySync();
-  memoryUpdateInFlight = true;
-
-  (async () => {
-    try {
-      const prompt = `You are a background educational memory tracker updating a student's Learning & Thinking Map from the latest English conversation snippet.
-Preserve existing valid insights, merge NEW facts concisely, score any discussed topics (1-10 engagement & 1-10 English fluency), and refine how the student thinks/understands explanations best.
-
-CURRENT MAP:
-- Hobbies: ${JSON.stringify(current.hobbies)}
-- Facts: ${JSON.stringify(current.facts)}
-- Topic Scores: ${JSON.stringify(current.topicScores)}
-- Cognitive Map: ${JSON.stringify(current.cognitiveMap)}
-- Current Session Focus: ${topicLabel}
-
-LATEST EXCHANGES:
-${recentTurns}
-
-Return ONE compact JSON object:
-{
-  "newHobbies": ["short hobby/interest only if genuinely mentioned, else []"],
-  "newFacts": ["concise factual detail about the student's work/life/goals only if mentioned, else []"],
-  "scoredTopics": [{"topic": "short 2-4 word topic", "engagement": 1-10, "fluency": 1-10}],
-  "cognitiveMap": {
-    "thinkingStyle": "concise label",
-    "explanationPreference": "how grammar/concepts click best for this student",
-    "tonePreference": "preferred conversational tone",
-    "summary": "1-2 sentence portrait of how this student thinks and communicates"
-  }
-}`;
-      const res = await fetchOllamaChat(
-        {
-          model,
-          stream: false,
-          format: 'json',
-          options: { temperature: 0.2, num_predict: 420 },
-          messages: [{ role: 'user', content: prompt }]
-        },
-        25000
-      );
-      const data = await res.json();
-      const upd = extractJsonSafe(data?.message?.content || '');
-      const next = getStudentMemorySync();
-
-      if (Array.isArray(upd.newHobbies)) {
-        next.hobbies = [...new Set([...next.hobbies, ...upd.newHobbies.map((x) => String(x).trim()).filter((x) => x.length >= 2 && x.length <= 40)])].slice(0, 14);
-      }
-      if (Array.isArray(upd.newFacts)) {
-        next.facts = [...new Set([...next.facts, ...upd.newFacts.map((x) => String(x).trim()).filter((x) => x.length >= 4 && x.length <= 90)])].slice(0, 14);
-      }
-      if (Array.isArray(upd.scoredTopics)) {
-        const map = new Map(next.topicScores.map((t) => [String(t.topic).toLowerCase(), t]));
-        const today = new Date().toISOString().slice(0, 10);
-        for (const st of upd.scoredTopics) {
-          const name = String(st?.topic || '').trim();
-          if (!name || name.length > 48) continue;
-          const prev = map.get(name.toLowerCase());
-          const eng = Math.max(1, Math.min(10, Math.round(Number(st.engagement || 7))));
-          const flu = Math.max(1, Math.min(10, Math.round(Number(st.fluency || 7))));
-          map.set(name.toLowerCase(), {
-            topic: prev?.topic || name,
-            engagement: prev ? Math.round((prev.engagement + eng) / 2) : eng,
-            fluency: prev ? Math.round((prev.fluency + flu) / 2) : flu,
-            count: (prev?.count || 0) + 1,
-            lastUsedAt: today
-          });
-        }
-        next.topicScores = Array.from(map.values()).slice(0, 16);
-      }
-      if (upd.cognitiveMap && typeof upd.cognitiveMap === 'object') {
-        const cm = upd.cognitiveMap;
-        next.cognitiveMap = {
-          thinkingStyle: String(cm.thinkingStyle || next.cognitiveMap.thinkingStyle).trim().slice(0, 80),
-          explanationPreference: String(cm.explanationPreference || next.cognitiveMap.explanationPreference).trim().slice(0, 110),
-          tonePreference: String(cm.tonePreference || next.cognitiveMap.tonePreference).trim().slice(0, 80),
-          summary: String(cm.summary || next.cognitiveMap.summary).trim().slice(0, 220)
-        };
-      }
-      saveStudentMemorySync(next);
-    } catch {
-      // Best-effort background memory update
-    } finally {
-      memoryUpdateInFlight = false;
-    }
-  })();
 }
 
 function buildTutorSystemPrompt({ teacher, topicObj, customTopic = '', tutorLevel = 'B2-C1', firstName = 'there', stackSummary = '', studentBrief = '', retryOf = null, action = 'turn' }) {
@@ -505,6 +421,12 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     topic = 'HR',
     day = null,
     continuousFlow,
+    elapsedSeconds = null,
+    targetDurationSeconds = null,
+    interrupted = false,
+    screenShareId = null,
+    highlightedLines = [],
+    artifactNotes = '',
     retryOf = null,
     doubleXpActive = false
   } = body;
@@ -522,9 +444,15 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     ? 'Guest'
     : (String(activeCv?.profile?.candidateName || 'there').trim().split(/\s+/)[0] || 'there');
 
-  const rawNormalizedMsgs = (messages || []).map((m) =>
-    m.role === 'user' ? { ...m, content: normalizeInterviewTranscript(m.content) } : m
-  );
+  const rawNormalizedMsgs = (Array.isArray(messages) ? messages : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m) => {
+      const content = String(m.content || '').slice(0, 8000);
+      return {
+        role: m.role,
+        content: m.role === 'user' ? normalizeInterviewTranscript(content, { mode }) : content
+      };
+    });
   const { recentMessages: normalizedMsgs, earlierSummary } = trimConversationForTier(
     rawNormalizedMsgs,
     isFinish ? 24 : tierInfo.budgets.maxHistoryMsgs
@@ -536,14 +464,21 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
   let chosenTutorAngle = '';
   let tutorTopicLabel = '';
   let resolvedCompany = '';
+  let effectiveAgentFile = agentFile;
+  let effectiveJdFile = jdFile;
+  let effectiveTopic = topic;
 
   if (mode === 'logic') {
     const teacher = TUTOR_CATALOG.teachers.find((t) => t.id === tutorTeacherId) || TUTOR_CATALOG.teachers[0];
-    const puzzle = resolveLogicPuzzleById(logicPuzzleId);
+    const puzzle = resolveLogicPuzzleById(logicPuzzleId) || CURATED_LOGIC_PUZZLES[0];
+    effectiveAgentFile = teacher.id;
+    effectiveJdFile = puzzle.id;
+    effectiveTopic = puzzle.category || 'Logic Puzzle';
     if (isFinish) {
       return {
-        model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
-        systemPrompt: '', // built below with jsonContract
+        model, mode, isGuestSession, firstName, normalizedMsgs, tierInfo, earlierSummary,
+        topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
+        systemPrompt: '',
         logicFinishMeta: { teacher, puzzle, scratchpadText },
         startPrompt
       };
@@ -564,19 +499,23 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
   } else if (mode === 'tutor') {
     const teacher = TUTOR_CATALOG.teachers.find((t) => t.id === tutorTeacherId) || TUTOR_CATALOG.teachers[0];
     const topicObj = TUTOR_CATALOG.topics.find((tp) => tp.id === topic || tp.id === tutorTopic) || TUTOR_CATALOG.topics[0];
-    const customTopicText = TUTOR_CATALOG.topics.some((tp) => tp.id === tutorTopic) ? '' : tutorTopic;
-
+    const customTopicText = TUTOR_CATALOG.topics.some((tp) => tp.id === tutorTopic) ? '' : String(tutorTopic || '').trim();
+    effectiveAgentFile = teacher.id;
+    effectiveTopic = 'English Tutor';
     if (isFinish) {
+      effectiveJdFile = customTopicText || topicObj.label;
       return {
-        model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
+        model, mode, isGuestSession, firstName, normalizedMsgs, tierInfo, earlierSummary,
+        topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
         tutorFinishMeta: { teacher, tutorLevel },
         systemPrompt: '',
         startPrompt
       };
     }
     if (isGuestSession) {
-      chosenTutorAngle = customTopicText || (topicObj.id === 'fresh-rotate' ? TUTOR_ROTATION_ANGLES[Math.floor(Math.random() * TUTOR_ROTATION_ANGLES.length)] : topicObj.label);
+      chosenTutorAngle = customTopicText || (topicObj.id === 'fresh-rotate' ? pickFreshTutorAngle({ recentAngles: [] }) : topicObj.label);
       tutorTopicLabel = chosenTutorAngle || 'General English Conversation';
+      effectiveJdFile = tutorTopicLabel;
       systemPrompt = buildTutorSystemPrompt({
         teacher, topicObj, customTopic: customTopicText, tutorLevel, firstName: 'there', stackSummary: '',
         studentBrief: '\nGUEST PRACTICE MODE: Have a straightforward, friendly general English conversation. Do NOT assume any specific profession, hobby, or prior history. Do NOT save or reference any personal profile notes.',
@@ -586,16 +525,17 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     } else {
       const stackSummary = (activeCv?.profile?.coreStack || []).slice(0, 5).join(', ');
       const mem = getStudentMemorySync();
-      if (action === 'start' && messages.length === 0) {
-        chosenTutorAngle = customTopicText || pickFreshTutorAngle(mem);
-        if (!customTopicText) {
+      if (action === 'start' && rawNormalizedMsgs.length === 0) {
+        chosenTutorAngle = customTopicText || (topicObj.id === 'fresh-rotate' ? pickFreshTutorAngle(mem) : topicObj.label);
+        if (!customTopicText && topicObj.id === 'fresh-rotate') {
           mem.recentAngles = [chosenTutorAngle, ...(mem.recentAngles || []).filter((a) => a !== chosenTutorAngle)].slice(0, 8);
           saveStudentMemorySync(mem);
         }
       } else {
-        chosenTutorAngle = customTopicText || mem.recentAngles?.[0] || topicObj.label;
+        chosenTutorAngle = customTopicText || (topicObj.id === 'fresh-rotate' ? (mem.recentAngles?.[0] || topicObj.label) : topicObj.label);
       }
       tutorTopicLabel = chosenTutorAngle || topicObj.label;
+      effectiveJdFile = tutorTopicLabel;
       systemPrompt = buildTutorSystemPrompt({
         teacher, topicObj, customTopic: customTopicText, tutorLevel, firstName, stackSummary,
         studentBrief: buildStudentMemoryBrief(mem, chosenTutorAngle), retryOf, action
@@ -604,12 +544,19 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     }
   } else {
     const isContinuous = continuousFlow !== undefined ? Boolean(continuousFlow) : topic === 'HR';
+    const safeBaseAgent = path.basename(String(agentFile || ''));
+    const validMeta = AGENT_META.find((a) => a.id === safeBaseAgent);
+    if (!validMeta) {
+      const err = new Error(`Unknown interviewer agent: ${safeBaseAgent}`);
+      err.statusCode = 400;
+      throw err;
+    }
     const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv);
-    const meta = adaptedAgents.find((a) => a.id === path.basename(agentFile));
+    const meta = adaptedAgents.find((a) => a.id === validMeta.id) || validMeta;
     const personality = pickPersonality(topic, personalityTraits || personalityId);
     const personalityBlock = `INTERVIEWER PERSONALITY (${personality.emoji} ${personality.label} — ${personality.mood}):\nEmbody this realistic human personality naturally without exaggerating or becoming extreme.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
     const rawAgentMd = useStaticAgentFile
-      ? stripStaticOpenerSection(await fs.readFile(path.join(ROOT_DIR, 'agents', path.basename(agentFile)), 'utf8'))
+      ? stripStaticOpenerSection(await fs.readFile(path.join(ROOT_DIR, 'agents', validMeta.id), 'utf8'))
       : '';
     const agentLimit = isFinish ? 2200 : tierInfo.budgets.maxAgentChars;
     const jdLimit = isFinish ? 1400 : tierInfo.budgets.maxJdChars;
@@ -628,12 +575,21 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       action,
       topic,
       userTurns: fullUserTurnCount,
+      elapsedSeconds,
+      targetDurationSeconds,
       firstName,
       avatarName: meta?.avatarName || 'the interviewer',
       companyName: resolvedCompany,
       personality,
       openerHint,
       compactMode: tierInfo.budgets.compactPrompt
+    });
+    const screenShareArtifact = isScreenShareAllowedTopic(topic) && screenShareId ? findArtifactById(screenShareId) : null;
+    const addendum = buildTurnContextAddendum({
+      interrupted: Boolean(interrupted),
+      screenShareArtifact,
+      highlightedLines: Array.isArray(highlightedLines) ? highlightedLines.slice(0, 10) : [],
+      artifactNotes
     });
 
     if (!isFinish) {
@@ -651,6 +607,7 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         personalityBlock,
         pacing,
         earlierSummary,
+        addendum,
         agentPrompt,
         jdPrompt,
         delimiter: COACH_JSON_DELIMITER,
@@ -663,7 +620,8 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         ? `${activeCv?.profile?.profilePrompt || ''}\n\nFULL CV:\n${summarizeMdPrompt(activeCv?.rawText || '', 3000)}`
         : await fs.readFile(path.join(ROOT_DIR, '00-candidate-profile-and-core-rules.md'), 'utf8');
       return {
-        model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
+        model, mode, isGuestSession, firstName, normalizedMsgs, tierInfo, earlierSummary,
+        topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
         interviewFinishMeta: { coreRules, personalityBlock, agentPrompt, jdPrompt, activeCv, meta, isContinuous },
         systemPrompt: '',
         startPrompt
@@ -671,10 +629,17 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
     }
   }
 
-  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic, agentFile, jdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, interviewerCompany: resolvedCompany, systemPrompt, startPrompt, action, tierInfo };
+  return { model, mode, isGuestSession, firstName, normalizedMsgs, topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel, interviewerCompany: resolvedCompany, systemPrompt, startPrompt, action, tierInfo };
 }
 
-export async function handleChatStream(body, res) {
+export async function handleChatStream(body, reqOrRes, maybeRes = null) {
+  const req = maybeRes ? reqOrRes : null;
+  const res = maybeRes || reqOrRes;
+  const ac = new AbortController();
+  const markAborted = () => { if (!res.writableFinished) ac.abort(); };
+  req?.on?.('aborted', markAborted);
+  res.on?.('close', markAborted);
+
   const ctx = await resolveChatContext(body, { isFinish: false });
   const chatMessages = [{ role: 'system', content: ctx.systemPrompt }, ...ctx.normalizedMsgs];
   if (ctx.action === 'start' && ctx.normalizedMsgs.length === 0) {
@@ -682,17 +647,21 @@ export async function handleChatStream(body, res) {
   }
 
   const budgets = ctx.tierInfo?.budgets || { numCtx: 8192, numPredict: 380, repeatPenalty: 1.05 };
-  const ollamaRes = await fetchOllamaChat({
-    model: ctx.model,
-    messages: chatMessages,
-    stream: true,
-    options: {
-      temperature: 0.45,
-      num_ctx: budgets.numCtx,
-      num_predict: budgets.numPredict,
-      repeat_penalty: budgets.repeatPenalty
-    }
-  });
+  const ollamaRes = await fetchOllamaChat(
+    {
+      model: ctx.model,
+      messages: chatMessages,
+      stream: true,
+      options: {
+        temperature: 0.45,
+        num_ctx: budgets.numCtx,
+        num_predict: budgets.numPredict,
+        repeat_penalty: budgets.repeatPenalty
+      }
+    },
+    0,
+    ac.signal
+  );
 
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -701,49 +670,67 @@ export async function handleChatStream(body, res) {
   });
   res.flushHeaders?.();
 
+  const safeWrite = (obj) => {
+    if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify(obj) + '\n');
+  };
+
   let rawAll = '';
   let streamedSpokenLen = 0;
   let inThinking = false;
   let delimReached = false;
 
-  await consumeNdjsonBody(ollamaRes.body, (obj) => {
-    if (obj.message?.thinking) res.write(JSON.stringify({ type: 'thinking' }) + '\n');
-    const delta = obj.message?.content || '';
-    if (!delta) return;
+  try {
+    await consumeNdjsonBody(ollamaRes.body, (obj) => {
+      if (ac.signal.aborted) return;
+      if (obj.message?.thinking) safeWrite({ type: 'thinking' });
+      const delta = obj.message?.content || '';
+      if (!delta) return;
 
-    rawAll += delta;
-    if (/<think>/i.test(rawAll) && !/<\/think>/i.test(rawAll)) {
-      if (!inThinking) {
-        inThinking = true;
-        res.write(JSON.stringify({ type: 'thinking' }) + '\n');
-      }
-      return;
-    }
-    inThinking = false;
-
-    const clean = stripThinkBlocks(rawAll);
-    const { idx: delimIdx } = findCoachMarker(clean);
-    const spokenPart = delimIdx !== -1 ? clean.slice(0, delimIdx) : clean;
-
-    let safeEnd = spokenPart.length;
-    if (!delimReached && delimIdx === -1) {
-      for (let k = Math.min(COACH_JSON_DELIMITER.length - 1, spokenPart.length); k >= 1; k--) {
-        if (COACH_JSON_DELIMITER.startsWith(spokenPart.slice(spokenPart.length - k))) {
-          safeEnd = spokenPart.length - k;
-          break;
+      rawAll += delta;
+      if (/<think>/i.test(rawAll) && !/<\/think>/i.test(rawAll)) {
+        if (!inThinking) {
+          inThinking = true;
+          safeWrite({ type: 'thinking' });
         }
+        return;
       }
-      const tailHold = spokenPart.match(/(?:\s---+\s*\{?|\s```(?:json)?\s*\{?|\s\{\s*"coach|\s---?)$/);
-      if (tailHold && tailHold.index !== undefined && tailHold.index < safeEnd) safeEnd = tailHold.index;
-    }
-    if (delimIdx !== -1) delimReached = true;
+      inThinking = false;
 
-    if (safeEnd > streamedSpokenLen) {
-      const nextDelta = spokenPart.slice(streamedSpokenLen, safeEnd);
-      streamedSpokenLen = safeEnd;
-      res.write(JSON.stringify({ type: 'token', delta: nextDelta, spokenSoFar: spokenPart.slice(0, safeEnd).trimStart() }) + '\n');
+      const clean = stripThinkBlocks(rawAll);
+      const { idx: delimIdx } = findCoachMarker(clean);
+      const spokenPart = delimIdx !== -1 ? clean.slice(0, delimIdx) : clean;
+
+      let safeEnd = spokenPart.length;
+      if (!delimReached && delimIdx === -1) {
+        for (let k = Math.min(COACH_JSON_DELIMITER.length - 1, spokenPart.length); k >= 1; k--) {
+          if (COACH_JSON_DELIMITER.startsWith(spokenPart.slice(spokenPart.length - k))) {
+            safeEnd = spokenPart.length - k;
+            break;
+          }
+        }
+        const tailHold = spokenPart.match(/(?:\s---+\s*\{?|\s```(?:json)?\s*\{?|\s\{\s*(?:"(?:expression|coachPause|grammarFixes|scratchpadPin|microTipHu)?)?|\s---?)$/);
+        if (tailHold && tailHold.index !== undefined && tailHold.index < safeEnd) safeEnd = tailHold.index;
+      }
+      if (delimIdx !== -1) delimReached = true;
+
+      if (safeEnd > streamedSpokenLen) {
+        const nextDelta = spokenPart.slice(streamedSpokenLen, safeEnd);
+        streamedSpokenLen = safeEnd;
+        safeWrite({ type: 'token', delta: nextDelta, spokenSoFar: spokenPart.slice(0, safeEnd).trimStart() });
+      }
+    });
+  } catch (err) {
+    if (!ac.signal.aborted) {
+      safeWrite({ type: 'error', error: err.message });
     }
-  });
+    if (!res.writableEnded && !res.destroyed) res.end();
+    return;
+  }
+
+  if (ac.signal.aborted) {
+    if (!res.writableEnded && !res.destroyed) res.end();
+    return;
+  }
 
   const cleanFinal = stripThinkBlocks(rawAll).trim();
   const { idx: delimIdx, markerLen } = findCoachMarker(cleanFinal);
@@ -759,12 +746,12 @@ export async function handleChatStream(body, res) {
   const { xpEarned, state } = ctx.isGuestSession
     ? { xpEarned: 0, state: await ensureState() }
     : await persistChatSideEffects(reply, {
-        model: ctx.model, action: ctx.action, topic: ctx.topic, agentFile: ctx.agentFile, jdFile: ctx.jdFile, day: ctx.day,
+        mode: ctx.mode, action: ctx.action, topic: ctx.topic, agentFile: ctx.agentFile, jdFile: ctx.jdFile, day: ctx.day,
         isRetryPractice: Boolean(ctx.retryOf?.better), doubleXpActive: Boolean(ctx.doubleXpActive)
       });
 
-  res.write(JSON.stringify({ type: 'done', reply, xpEarned, state, tutorAngle: ctx.chosenTutorAngle || null, interviewerCompany: ctx.interviewerCompany || null }) + '\n');
-  res.end();
+  safeWrite({ type: 'done', reply, xpEarned, state, tutorAngle: ctx.chosenTutorAngle || null, interviewerCompany: ctx.interviewerCompany || null });
+  if (!res.writableEnded && !res.destroyed) res.end();
 
   if (ctx.mode === 'tutor' && !ctx.isGuestSession && ctx.action === 'turn' && ctx.normalizedMsgs.length >= 2) {
     scheduleStudentMemoryUpdate({
@@ -776,13 +763,13 @@ export async function handleChatStream(body, res) {
 }
 
 export async function handleChat(body) {
+  if (body?.action && body.action !== 'finish') {
+    const err = new Error('POST /api/chat only handles action="finish"; use POST /api/chat/stream for turns.');
+    err.statusCode = 400;
+    throw err;
+  }
   const ctx = await resolveChatContext(body, { isFinish: true });
-  const isContinuous = ctx.interviewFinishMeta?.isContinuous ?? true;
-  const flowRules = isContinuous
-    ? `- CONVERSATION MODE: CONTINUOUS NATURAL DIALOGUE. Put refinements in "microTipHu".`
-    : `- CONVERSATION MODE: STRICT COACH PAUSE. Trigger coachPause if phrasing is weak.`;
-
-  const jsonContract = `
+  const buildFinishContract = (verdictEnum) => `
 === STRICT OUTPUT FORMAT (RETURN ONLY VALID JSON, NO MARKDOWN FENCES) ===
 CRITICAL LANGUAGE RULE: ALL JSON fields MUST be in English ONLY.
 {
@@ -793,47 +780,53 @@ CRITICAL LANGUAGE RULE: ALL JSON fields MUST be in English ONLY.
     "subScores": { "english": 1-10, "analysis": 1-10, "techRoi": 1-10, "confidence": 1-10 },
     "totalScore": number (1.0-10.0),
     "percentile": "Top X%",
-    "verdict": "NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)",
+    "verdict": ${verdictEnum},
     "strengthsHu": ["Concrete strength 1 in English", "Concrete strength 2 in English"],
     "weaknessesHu": ["Concrete improvement 1 in English", "Concrete improvement 2 in English"],
-    "goldenSentences": ["Senior English golden sentence 1", "Golden sentence 2", "Golden sentence 3"]
+    "goldenSentences": ["Senior English golden sentence 1", "Golden sentence 2", "Golden sentence 3"],
+    "candidateQuestionsNote": null OR "1 concise sentence evaluating whether the candidate asked insightful closing questions"
   }
-}
-${flowRules}`;
+}`;
 
   let systemPrompt = '';
   let finishPrompt = 'The 10-minute interview is over. Say a realistic English goodbye in "spokenEnglish" and return the strict English Top 5% "scorecard" JSON object now.';
+  const summaryNote = ctx.earlierSummary ? `\n\n${ctx.earlierSummary}` : '';
   if (ctx.logicFinishMeta) {
     const { teacher, puzzle, scratchpadText } = ctx.logicFinishMeta;
     systemPrompt = `You are ${teacher.name}, wrapping up a collaborative ${puzzle?.durationMinutes || 10}-minute analytical logic puzzle ("${puzzle?.title || 'Logic Puzzle'}") with ${ctx.firstName}.
 Active scratchpad notes: """${String(scratchpadText || '').slice(0, 1500)}"""
 Reference key solution: ${puzzle?.solutionGuide || ''}
-Set "verdict" to "SHARP REASONING", "SOLID STRUCTURE", or "KEEP PRACTICING", give 2 concrete strengths in "strengthsHu", 2 improvements in "weaknessesHu", and 3 English problem-solving phrases in "goldenSentences".\n\n${jsonContract}`;
+Give 2 concrete strengths in "strengthsHu", 2 improvements in "weaknessesHu", and 3 English problem-solving phrases in "goldenSentences".${summaryNote}\n\n${buildFinishContract('"SHARP REASONING" | "SOLID STRUCTURE" | "KEEP PRACTICING"')}`;
     finishPrompt = 'The logic puzzle practice call is wrapping up! Summarize what worked well on the scratchpad and reasoning in "spokenEnglish" (concise grounded English), and return ONLY valid JSON with an honest analytical "scorecard" object.';
   } else if (ctx.tutorFinishMeta) {
     const { teacher, tutorLevel } = ctx.tutorFinishMeta;
-    systemPrompt = `You are ${teacher.name}, a warm female English teacher wrapping up a lesson with ${ctx.firstName} (Target level: ${tutorLevel}). Evaluate English clarity, grammar progress, natural phrasing, and confidence in English ONLY. Set "verdict" to "EXCELLENT PROGRESS" or "GREAT FLUENCY", give 2 strengths in "strengthsHu", 2 grammar rules in "weaknessesHu", and 3 sentences in "goldenSentences".\n\n${jsonContract}`;
+    systemPrompt = `You are ${teacher.name}, a warm female English teacher wrapping up a lesson with ${ctx.firstName} (Target level: ${tutorLevel}). Evaluate English clarity, grammar progress, natural phrasing, and confidence in English ONLY. Give 2 strengths in "strengthsHu", 2 grammar rules in "weaknessesHu", and 3 sentences in "goldenSentences".${summaryNote}\n\n${buildFinishContract('"EXCELLENT PROGRESS" | "GREAT FLUENCY" | "STEADY GROWTH"')}`;
     finishPrompt = 'The English lesson is wrapping up! Return a warm teacher goodbye in "spokenEnglish" and return ONLY valid JSON matching the exact schema with an encouraging "scorecard" object.';
   } else {
     const m = ctx.interviewFinishMeta;
-    systemPrompt = `${m.coreRules}\n\n${m.personalityBlock}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${jsonContract}`;
+    systemPrompt = `${m.coreRules}\n\n${m.personalityBlock}${summaryNote}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`;
   }
 
+  const budgets = ctx.tierInfo?.budgets || { numCtx: 8192, numPredict: 700 };
   const chatMessages = [{ role: 'system', content: systemPrompt }, ...ctx.normalizedMsgs, { role: 'user', content: finishPrompt }];
-  const ollamaRes = await fetchOllamaChat({
-    model: ctx.model,
-    messages: chatMessages,
-    stream: false,
-    format: 'json',
-    options: { temperature: 0.45 }
-  });
+  const ollamaRes = await fetchOllamaChat(
+    {
+      model: ctx.model,
+      messages: chatMessages,
+      stream: false,
+      format: 'json',
+      options: { temperature: 0.45, num_ctx: budgets.numCtx, num_predict: Math.max(700, budgets.numPredict || 700) }
+    },
+    90000
+  );
   const ollamaData = await ollamaRes.json();
   const parsed = extractJsonSafe(ollamaData?.message?.content || '');
 
   const { xpEarned, state } = ctx.isGuestSession
     ? { xpEarned: 0, state: await ensureState() }
     : await persistChatSideEffects(parsed, {
-        model: ctx.model, action: body.action || 'finish', topic: ctx.topic, agentFile: ctx.agentFile, jdFile: ctx.jdFile, day: ctx.day, doubleXpActive: Boolean(ctx.doubleXpActive)
+        mode: ctx.mode, action: body.action || 'finish', topic: ctx.topic, agentFile: ctx.agentFile, jdFile: ctx.jdFile, day: ctx.day, doubleXpActive: Boolean(ctx.doubleXpActive),
+        speechMetrics: body?.speechMetrics || null
       });
 
   if (ctx.mode === 'tutor' && !ctx.isGuestSession && ctx.normalizedMsgs.length >= 2) {
@@ -845,3 +838,5 @@ Set "verdict" to "SHARP REASONING", "SOLID STRUCTURE", or "KEEP PRACTICING", giv
   }
   return { reply: parsed, xpEarned, state };
 }
+
+export { resolveChatContext };

@@ -1,6 +1,7 @@
 import { esc } from '../components.js';
 import { $, state } from './state.js';
-import { rollDetailedDna, startDetailedAvatarLoop } from './avatar-detailed.js';
+import { rollDetailedDna, startDetailedAvatarLoop, stopDetailedAvatarLoopsExcept } from './avatar-detailed.js';
+import { startSvgAvatarLoop, stopSvgAvatarLoopsExcept } from './avatar-svg-live.js';
 import { getSpeechLipLevel, getSpeechViseme } from './voice-media.js';
 
 const FEMALE_HAIRSTYLES = ['bob', 'ponytail', 'bun', 'layered', 'pixie'];
@@ -279,8 +280,8 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
 
   const mouthPath =
     appearance?.smileMood === 'smile'
-      ? `<path d="M100 124 Q110 130 120 124" fill="none" stroke="${skin.earShadow}" stroke-width="2.3" stroke-linecap="round" />`
-      : `<path d="M103 125 Q110 127 117 125" fill="none" stroke="${skin.earShadow}" stroke-width="2.1" stroke-linecap="round" />`;
+      ? `<path class="avatar-mouth-lip" d="M100 124 Q110 130 120 124" fill="none" stroke="${skin.earShadow}" stroke-width="2.3" stroke-linecap="round" />`
+      : `<path class="avatar-mouth-lip" d="M103 125 Q110 127 117 125" fill="none" stroke="${skin.earShadow}" stroke-width="2.1" stroke-linecap="round" />`;
 
   return `
     <svg class="interviewer-svg" viewBox="10 2 200 210" role="img" aria-label="${esc(meta.avatarName)} — animated interviewer sitting at office desk">
@@ -329,26 +330,34 @@ export function buildCharacterSvgHtml(meta, prefix, genderOverride = null, appea
         ${hair.front}
         ${headsetSvg}
         <g class="avatar-face-eyes">
-          <path d="${browLeft}" fill="none" stroke="${esc(p.hairB || '#4b352a')}" stroke-width="3" stroke-linecap="round" />
-          <path d="${browRight}" fill="none" stroke="${esc(p.hairB || '#4b352a')}" stroke-width="3" stroke-linecap="round" />
+          <path class="avatar-brow-l" d="${browLeft}" fill="none" stroke="${esc(p.hairB || '#4b352a')}" stroke-width="3" stroke-linecap="round" />
+          <path class="avatar-brow-r" d="${browRight}" fill="none" stroke="${esc(p.hairB || '#4b352a')}" stroke-width="3" stroke-linecap="round" />
           <g class="avatar-eyes-blink">
             <ellipse cx="89" cy="95" rx="9" ry="9.8" fill="#fefefe" />
-            <circle cx="89" cy="95.5" r="7" fill="${iris}" stroke="${irisRing}" stroke-width="1.2" />
-            <circle cx="89" cy="95.5" r="3.9" fill="#0f172a" />
-            <circle cx="91.6" cy="92.8" r="2.4" fill="#ffffff" />
-            <circle cx="86.6" cy="98.2" r="1.1" fill="#ffffff" opacity="0.72" />
+            <g class="avatar-iris-l">
+              <circle cx="89" cy="95.5" r="7" fill="${iris}" stroke="${irisRing}" stroke-width="1.2" />
+              <circle cx="89" cy="95.5" r="3.9" fill="#0f172a" />
+              <circle cx="91.6" cy="92.8" r="2.4" fill="#ffffff" />
+              <circle cx="86.6" cy="98.2" r="1.1" fill="#ffffff" opacity="0.72" />
+            </g>
             <path d="M80 91 Q89 83 98 91" fill="none" stroke="rgba(15,23,42,0.24)" stroke-width="1.7" stroke-linecap="round" />
 
             <ellipse cx="131" cy="95" rx="9" ry="9.8" fill="#fefefe" />
-            <circle cx="131" cy="95.5" r="7" fill="${iris}" stroke="${irisRing}" stroke-width="1.2" />
-            <circle cx="131" cy="95.5" r="3.9" fill="#0f172a" />
-            <circle cx="133.6" cy="92.8" r="2.4" fill="#ffffff" />
-            <circle cx="128.6" cy="98.2" r="1.1" fill="#ffffff" opacity="0.72" />
+            <g class="avatar-iris-r">
+              <circle cx="131" cy="95.5" r="7" fill="${iris}" stroke="${irisRing}" stroke-width="1.2" />
+              <circle cx="131" cy="95.5" r="3.9" fill="#0f172a" />
+              <circle cx="133.6" cy="92.8" r="2.4" fill="#ffffff" />
+              <circle cx="128.6" cy="98.2" r="1.1" fill="#ffffff" opacity="0.72" />
+            </g>
             <path d="M122 91 Q131 83 140 91" fill="none" stroke="rgba(15,23,42,0.24)" stroke-width="1.7" stroke-linecap="round" />
           </g>
         </g>
         <path d="M107.5 111 Q110 113.5 112.5 111" fill="none" stroke="${skin.earShadow}" stroke-width="1.6" stroke-linecap="round" />
-        ${mouthPath}
+        <g class="avatar-mouth-wrap">
+          <path class="avatar-mouth-cavity" d="M101 124 Q110 124 119 124 Q110 125 101 124 Z" fill="#4c1d24" opacity="0" />
+          <rect class="avatar-mouth-teeth" x="103" y="123.8" width="14" height="2" rx="1" fill="#f8fafc" opacity="0" />
+          ${mouthPath}
+        </g>
         ${glassesSvg}
       </g>
     </svg>
@@ -385,21 +394,21 @@ function syncOfficeBackdrop(containerEl, appearance = null) {
   }
   bgEl.style.backgroundImage = `url('/assets/offices/${office.file}')`;
   bgEl.classList.toggle('is-flipped', isFlipped);
-  containerEl.querySelector('.stage-desk-edge')?.remove();
 }
 
 function mountDetailedCanvas(mountEl, roleLabel, stateGetter) {
-  if (!mountEl) return;
+  if (!mountEl) return null;
   let canvas = mountEl.querySelector('canvas.detailed-avatar-canvas');
   if (!canvas) {
     mountEl.innerHTML = '';
     canvas = document.createElement('canvas');
     canvas.className = 'detailed-avatar-canvas';
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', `${roleLabel} — detailed studio interviewer avatar`);
     mountEl.appendChild(canvas);
   }
+  canvas.setAttribute('aria-label', `${roleLabel} — detailed studio interviewer avatar`);
   startDetailedAvatarLoop(canvas, stateGetter);
+  return canvas;
 }
 
 export function renderAvatarVisual(force = false) {
@@ -408,25 +417,49 @@ export function renderAvatarVisual(force = false) {
   const gender = inferVoiceGender(voiceKey);
   const appearance = state.lobbyCfg?.appearance || state.activeSession?.appearance || null;
   const quality = state.user?.avatarQuality === 'detailed' ? 'detailed' : 'standard';
-  const key = `${quality}:${meta.id}:${gender}:${appearance?.sig || 'base'}`;
+  const lobbyActive = !$('#view-lobby')?.classList.contains('inactive');
+  const arenaActive = !$('#view-arena')?.classList.contains('inactive');
+  const key = `${quality}:${meta.id}:${gender}:${appearance?.sig || 'base'}:${lobbyActive ? 1 : 0}${arenaActive ? 1 : 0}`;
 
   if (force || key !== lastRenderedAvatarKey) {
     lastRenderedAvatarKey = key;
+    const stateGetter = () => ({
+      meta: getActiveAgentMeta(state.lobbyCfg?.agentFile || state.activeSession?.agentFile),
+      gender: inferVoiceGender(state.lobbyCfg ? ($('#lobby-voice-select')?.value || meta.defaultVoice) : (state.activeSession?.voice || meta.defaultVoice)),
+      appearance: state.lobbyCfg?.appearance || state.activeSession?.appearance || null,
+      baseSmile: (state.lobbyCfg?.appearance || state.activeSession?.appearance)?.smileMood === 'smile' ? 0.36 : 0.14,
+      getMode: () => avatarMode,
+      getExpression: () => state.activeSession?.liveExpression || 'warm',
+      getLipLevel: (now) => getSpeechLipLevel(now),
+      getViseme: (now) => getSpeechViseme(now)
+    });
     if (quality === 'detailed') {
-      const stateGetter = () => ({
-        meta: getActiveAgentMeta(state.lobbyCfg?.agentFile || state.activeSession?.agentFile),
-        gender: inferVoiceGender(state.lobbyCfg ? ($('#lobby-voice-select')?.value || meta.defaultVoice) : (state.activeSession?.voice || meta.defaultVoice)),
-        appearance: state.lobbyCfg?.appearance || state.activeSession?.appearance || null,
-        getMode: () => avatarMode,
-        getExpression: () => state.activeSession?.liveExpression || 'warm',
-        getLipLevel: (now) => getSpeechLipLevel(now),
-        getViseme: (now) => getSpeechViseme(now)
-      });
-      mountDetailedCanvas($('#call-avatar-mount'), meta.avatarName, stateGetter);
-      mountDetailedCanvas($('#lobby-avatar-mount'), meta.avatarName, stateGetter);
+      stopSvgAvatarLoopsExcept(new Set());
+      const keep = new Set();
+      if (arenaActive) {
+        const c = mountDetailedCanvas($('#call-avatar-mount'), meta.avatarName, stateGetter);
+        if (c) keep.add(c);
+      }
+      if (lobbyActive) {
+        const c = mountDetailedCanvas($('#lobby-avatar-mount'), meta.avatarName, stateGetter);
+        if (c) keep.add(c);
+      }
+      stopDetailedAvatarLoopsExcept(keep);
     } else {
-      if ($('#call-avatar-mount')) $('#call-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'call', gender, appearance);
-      if ($('#lobby-avatar-mount')) $('#lobby-avatar-mount').innerHTML = buildCharacterSvgHtml(meta, 'lobby', gender, appearance);
+      stopDetailedAvatarLoopsExcept(new Set());
+      const keepSvgs = new Set();
+      const mountSvg = (mountEl, prefix) => {
+        if (!mountEl) return;
+        mountEl.innerHTML = buildCharacterSvgHtml(meta, prefix, gender, appearance);
+        const svg = mountEl.querySelector('svg.interviewer-svg');
+        if (svg) {
+          startSvgAvatarLoop(svg, stateGetter);
+          keepSvgs.add(svg);
+        }
+      };
+      if (arenaActive) mountSvg($('#call-avatar-mount'), 'call');
+      if (lobbyActive) mountSvg($('#lobby-avatar-mount'), 'lobby');
+      stopSvgAvatarLoopsExcept(keepSvgs);
     }
   }
   const p = appearance || meta.palette || {};

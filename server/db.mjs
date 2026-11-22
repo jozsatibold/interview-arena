@@ -10,6 +10,16 @@ import {
 } from './config.mjs';
 
 let dbInstance = null;
+let memoryResetGeneration = 0;
+
+export function getMemoryResetGeneration() {
+  return memoryResetGeneration;
+}
+
+export function safeNumber(val, fallback = 0) {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 export function withTransaction(db, fn) {
   db.exec('BEGIN IMMEDIATE');
@@ -30,6 +40,7 @@ export function getDb() {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
 
     CREATE TABLE IF NOT EXISTS user_profile (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -48,6 +59,12 @@ export function getDb() {
       default_auto_speak INTEGER NOT NULL DEFAULT 1,
       default_continuous_flow INTEGER NOT NULL DEFAULT 1,
       avatar_quality TEXT NOT NULL DEFAULT 'standard',
+      default_exam_mode INTEGER NOT NULL DEFAULT 0,
+      show_captions INTEGER NOT NULL DEFAULT 1,
+      call_ambient_audio INTEGER NOT NULL DEFAULT 0,
+      mic_mode TEXT NOT NULL DEFAULT 'manual',
+      default_layout TEXT NOT NULL DEFAULT 'spotlight',
+      default_duration_minutes INTEGER NOT NULL DEFAULT 12,
       power_ups_json TEXT NOT NULL,
       completed_days_json TEXT NOT NULL
     );
@@ -63,7 +80,8 @@ export function getDb() {
       sub_scores_json TEXT NOT NULL,
       total_score REAL NOT NULL,
       percentile TEXT,
-      verdict TEXT
+      verdict TEXT,
+      speech_metrics_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS mistakes (
@@ -144,6 +162,15 @@ export function getDb() {
   if (!cols.has('default_continuous_flow')) db.exec('ALTER TABLE user_profile ADD COLUMN default_continuous_flow INTEGER NOT NULL DEFAULT 1');
   if (!cols.has('model_context_tier')) db.exec("ALTER TABLE user_profile ADD COLUMN model_context_tier TEXT NOT NULL DEFAULT 'auto'");
   if (!cols.has('avatar_quality')) db.exec("ALTER TABLE user_profile ADD COLUMN avatar_quality TEXT NOT NULL DEFAULT 'standard'");
+  if (!cols.has('default_exam_mode')) db.exec('ALTER TABLE user_profile ADD COLUMN default_exam_mode INTEGER NOT NULL DEFAULT 0');
+  if (!cols.has('show_captions')) db.exec('ALTER TABLE user_profile ADD COLUMN show_captions INTEGER NOT NULL DEFAULT 1');
+  if (!cols.has('call_ambient_audio')) db.exec('ALTER TABLE user_profile ADD COLUMN call_ambient_audio INTEGER NOT NULL DEFAULT 0');
+  if (!cols.has('mic_mode')) db.exec("ALTER TABLE user_profile ADD COLUMN mic_mode TEXT NOT NULL DEFAULT 'manual'");
+  if (!cols.has('default_layout')) db.exec("ALTER TABLE user_profile ADD COLUMN default_layout TEXT NOT NULL DEFAULT 'spotlight'");
+  if (!cols.has('default_duration_minutes')) db.exec('ALTER TABLE user_profile ADD COLUMN default_duration_minutes INTEGER NOT NULL DEFAULT 12');
+
+  const sessCols = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name));
+  if (!sessCols.has('speech_metrics_json')) db.exec('ALTER TABLE sessions ADD COLUMN speech_metrics_json TEXT');
 
   const cvCols = new Set(db.prepare('PRAGMA table_info(cv_versions)').all().map((c) => c.name));
   if (!cvCols.has('generated_jds_json')) db.exec("ALTER TABLE cv_versions ADD COLUMN generated_jds_json TEXT NOT NULL DEFAULT '[]'");
@@ -174,56 +201,74 @@ export function getDb() {
   return dbInstance;
 }
 
+function upsertUserProfileSync(db, state) {
+  db.prepare(`
+    INSERT INTO user_profile (
+      id, xp, gems, streak, last_practice_date, streak_freezes,
+      selected_model, model_context_tier, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
+      default_auto_speak, default_continuous_flow, avatar_quality,
+      default_exam_mode, show_captions, call_ambient_audio, mic_mode, default_layout, default_duration_minutes,
+      power_ups_json, completed_days_json
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      xp = excluded.xp,
+      gems = excluded.gems,
+      streak = excluded.streak,
+      last_practice_date = excluded.last_practice_date,
+      streak_freezes = excluded.streak_freezes,
+      selected_model = excluded.selected_model,
+      model_context_tier = excluded.model_context_tier,
+      planner_model = excluded.planner_model,
+      vision_model = excluded.vision_model,
+      preferred_voice = excluded.preferred_voice,
+      tts_engine = excluded.tts_engine,
+      zonos_voice = excluded.zonos_voice,
+      default_auto_speak = excluded.default_auto_speak,
+      default_continuous_flow = excluded.default_continuous_flow,
+      avatar_quality = excluded.avatar_quality,
+      default_exam_mode = excluded.default_exam_mode,
+      show_captions = excluded.show_captions,
+      call_ambient_audio = excluded.call_ambient_audio,
+      mic_mode = excluded.mic_mode,
+      default_layout = excluded.default_layout,
+      default_duration_minutes = excluded.default_duration_minutes,
+      power_ups_json = excluded.power_ups_json,
+      completed_days_json = excluded.completed_days_json
+  `).run(
+    safeNumber(state.xp, 0),
+    safeNumber(state.gems, 150),
+    safeNumber(state.streak, 0),
+    state.lastPracticeDate ?? null,
+    safeNumber(state.streakFreezes, 2),
+    String(state.selectedModel || 'lfm2.5:8b'),
+    String(state.modelContextTier || 'auto'),
+    String(state.plannerModel || ''),
+    String(state.visionModel || ''),
+    String(state.preferredVoice || ''),
+    String(state.ttsEngine || 'auto'),
+    String(state.zonosVoice || 'AmericanFemale'),
+    state.defaultAutoSpeak === false ? 0 : 1,
+    state.defaultContinuousFlow === false ? 0 : 1,
+    ['standard', 'detailed'].includes(state.avatarQuality) ? state.avatarQuality : 'standard',
+    state.defaultExamMode ? 1 : 0,
+    state.showCaptions === false ? 0 : 1,
+    state.callAmbientAudio ? 1 : 0,
+    ['manual', 'ptt', 'handsfree'].includes(state.micMode) ? state.micMode : 'manual',
+    ['spotlight', 'split'].includes(state.defaultLayout) ? state.defaultLayout : 'spotlight',
+    [8, 12, 15, 25].includes(Number(state.defaultDurationMinutes)) ? Number(state.defaultDurationMinutes) : 12,
+    JSON.stringify(state.powerUps || DEFAULT_STATE.powerUps),
+    JSON.stringify(Array.isArray(state.completedDays) ? state.completedDays : [])
+  );
+}
+
 export function writeFullStateSync(db, state) {
   withTransaction(db, () => {
-    db.prepare(`
-      INSERT INTO user_profile (
-        id, xp, gems, streak, last_practice_date, streak_freezes,
-        selected_model, model_context_tier, planner_model, vision_model, preferred_voice, tts_engine, zonos_voice,
-        default_auto_speak, default_continuous_flow, avatar_quality, power_ups_json, completed_days_json
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        xp = excluded.xp,
-        gems = excluded.gems,
-        streak = excluded.streak,
-        last_practice_date = excluded.last_practice_date,
-        streak_freezes = excluded.streak_freezes,
-        selected_model = excluded.selected_model,
-        model_context_tier = excluded.model_context_tier,
-        planner_model = excluded.planner_model,
-        vision_model = excluded.vision_model,
-        preferred_voice = excluded.preferred_voice,
-        tts_engine = excluded.tts_engine,
-        zonos_voice = excluded.zonos_voice,
-        default_auto_speak = excluded.default_auto_speak,
-        default_continuous_flow = excluded.default_continuous_flow,
-        avatar_quality = excluded.avatar_quality,
-        power_ups_json = excluded.power_ups_json,
-        completed_days_json = excluded.completed_days_json
-    `).run(
-      Number(state.xp || 0),
-      Number(state.gems ?? 150),
-      Number(state.streak || 0),
-      state.lastPracticeDate ?? null,
-      Number(state.streakFreezes ?? 2),
-      String(state.selectedModel || 'lfm2.5:8b'),
-      String(state.modelContextTier || 'auto'),
-      String(state.plannerModel || ''),
-      String(state.visionModel || ''),
-      String(state.preferredVoice || ''),
-      String(state.ttsEngine || 'auto'),
-      String(state.zonosVoice || 'AmericanFemale'),
-      state.defaultAutoSpeak === false ? 0 : 1,
-      state.defaultContinuousFlow === false ? 0 : 1,
-      ['standard', 'detailed'].includes(state.avatarQuality) ? state.avatarQuality : 'standard',
-      JSON.stringify(state.powerUps || DEFAULT_STATE.powerUps),
-      JSON.stringify(Array.isArray(state.completedDays) ? state.completedDays : [])
-    );
+    upsertUserProfileSync(db, state);
 
     db.prepare('DELETE FROM sessions').run();
     const insSession = db.prepare(`
-      INSERT INTO sessions (id, sort_order, date, topic, agent_file, jd_file, day, sub_scores_json, total_score, percentile, verdict)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sessions (id, sort_order, date, topic, agent_file, jd_file, day, sub_scores_json, total_score, percentile, verdict, speech_metrics_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     (state.sessions || []).forEach((s, idx) => {
       insSession.run(
@@ -233,11 +278,12 @@ export function writeFullStateSync(db, state) {
         String(s.topic || ''),
         s.agentFile || null,
         s.jdFile || null,
-        s.day != null ? Number(s.day) : null,
+        s.day != null && Number.isFinite(Number(s.day)) ? Number(s.day) : null,
         JSON.stringify(s.subScores || {}),
-        Number(s.totalScore || 0),
+        safeNumber(s.totalScore, 0),
         s.percentile || null,
-        s.verdict || null
+        s.verdict || null,
+        s.speechMetrics ? JSON.stringify(s.speechMetrics) : null
       );
     });
 
@@ -254,7 +300,7 @@ export function writeFullStateSync(db, state) {
         String(m.original || ''),
         String(m.better || ''),
         String(m.reasonHu || ''),
-        Number(m.count || 1),
+        safeNumber(m.count, 1),
         m.mastered ? 1 : 0,
         String(m.topic || 'HR'),
         String(m.lastSeen || '')
@@ -289,8 +335,7 @@ export function writeCustomInterviewsSync(db, list) {
   });
 }
 
-export async function ensureState() {
-  const db = getDb();
+function readStateSync(db) {
   const row = db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
   if (!row) return structuredClone(DEFAULT_STATE);
 
@@ -307,7 +352,8 @@ export async function ensureState() {
       subScores: JSON.parse(r.sub_scores_json || '{}'),
       totalScore: r.total_score,
       percentile: r.percentile,
-      verdict: r.verdict
+      verdict: r.verdict,
+      speechMetrics: r.speech_metrics_json ? JSON.parse(r.speech_metrics_json) : null
     }));
 
   const mistakes = db
@@ -341,6 +387,12 @@ export async function ensureState() {
     defaultAutoSpeak: row.default_auto_speak !== 0,
     defaultContinuousFlow: row.default_continuous_flow !== 0,
     avatarQuality: row.avatar_quality || 'standard',
+    defaultExamMode: Boolean(row.default_exam_mode),
+    showCaptions: row.show_captions !== 0,
+    callAmbientAudio: Boolean(row.call_ambient_audio),
+    micMode: ['manual', 'ptt', 'handsfree'].includes(row.mic_mode) ? row.mic_mode : 'manual',
+    defaultLayout: ['spotlight', 'split'].includes(row.default_layout) ? row.default_layout : 'spotlight',
+    defaultDurationMinutes: [8, 12, 15, 25].includes(Number(row.default_duration_minutes)) ? Number(row.default_duration_minutes) : 12,
     powerUps: { ...DEFAULT_STATE.powerUps, ...JSON.parse(row.power_ups_json || '{}') },
     completedDays: JSON.parse(row.completed_days_json || '[]'),
     sessions,
@@ -348,8 +400,100 @@ export async function ensureState() {
   };
 }
 
+export async function ensureState() {
+  return readStateSync(getDb());
+}
+
+export function mutateStateSync(mutator) {
+  const db = getDb();
+  return withTransaction(db, () => {
+    const state = readStateSync(db);
+    const out = mutator(state, db);
+    if (out?.abort) return out;
+    upsertUserProfileSync(db, state);
+    if (out?.masteredMistakeId) {
+      db.prepare('UPDATE mistakes SET mastered = 1 WHERE id = ?').run(out.masteredMistakeId);
+    }
+    if (out?.newSession) {
+      const s = out.newSession;
+      const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS max_o FROM sessions').get()?.max_o ?? -1;
+      db.prepare(`
+        INSERT INTO sessions (id, sort_order, date, topic, agent_file, jd_file, day, sub_scores_json, total_score, percentile, verdict, speech_metrics_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        String(s.id),
+        maxOrder + 1,
+        String(s.date || ''),
+        String(s.topic || ''),
+        s.agentFile || null,
+        s.jdFile || null,
+        s.day != null && Number.isFinite(Number(s.day)) ? Number(s.day) : null,
+        JSON.stringify(s.subScores || {}),
+        safeNumber(s.totalScore, 0),
+        s.percentile || null,
+        s.verdict || null,
+        s.speechMetrics ? JSON.stringify(s.speechMetrics) : null
+      );
+    }
+    if (Array.isArray(out?.upsertMistakes) && out.upsertMistakes.length > 0) {
+      const sel = db.prepare('SELECT id, count FROM mistakes WHERE LOWER(original) = LOWER(?) LIMIT 1');
+      const upd = db.prepare('UPDATE mistakes SET count = ?, mastered = 0, last_seen = ?, better = ?, reason_hu = ? WHERE id = ?');
+      const ins = db.prepare(`
+        INSERT INTO mistakes (id, sort_order, category, original, better, reason_hu, count, mastered, topic, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `);
+      for (const m of out.upsertMistakes) {
+        const hit = sel.get(m.original);
+        if (hit) {
+          upd.run(Number(hit.count || 0) + 1, m.lastSeen, m.better, m.reasonHu, hit.id);
+        } else {
+          const minOrder = db.prepare('SELECT COALESCE(MIN(sort_order), 0) AS min_o FROM mistakes').get()?.min_o ?? 0;
+          ins.run(m.id, minOrder - 1, m.category, m.original, m.better, m.reasonHu, 1, m.topic, m.lastSeen);
+        }
+      }
+    }
+    return { state: readStateSync(db), ...(out || {}) };
+  });
+}
+
 export async function saveState(state) {
   writeFullStateSync(getDb(), state);
+}
+
+export function upsertCustomInterviewSync(pack) {
+  const db = getDb();
+  withTransaction(db, () => {
+    const minOrder = db.prepare('SELECT COALESCE(MIN(sort_order), 0) AS min_o FROM target_interviews').get()?.min_o ?? 0;
+    db.prepare(`
+      INSERT INTO target_interviews (
+        id, sort_order, created_at, planner_model, company, role_title, jd_text,
+        fit_summary_json, study_pack_json, rounds_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        company = excluded.company,
+        role_title = excluded.role_title,
+        jd_text = excluded.jd_text,
+        fit_summary_json = excluded.fit_summary_json,
+        study_pack_json = excluded.study_pack_json,
+        rounds_json = excluded.rounds_json
+    `).run(
+      String(pack.id),
+      minOrder - 1,
+      String(pack.createdAt || ''),
+      String(pack.plannerModel || ''),
+      String(pack.company || ''),
+      String(pack.roleTitle || ''),
+      String(pack.jdText || ''),
+      JSON.stringify(pack.fitSummary || {}),
+      JSON.stringify(pack.studyPack || {}),
+      JSON.stringify(pack.rounds || [])
+    );
+  });
+}
+
+export function deleteCustomInterviewSync(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM target_interviews WHERE id = ?').run(String(id));
 }
 
 export async function ensureCustomInterviews() {
@@ -427,15 +571,29 @@ export function insertAndActivateCvSync(cv) {
   });
 }
 
-export function updateCvGeneratedJdsSync(cvId, generatedJds) {
-  getDb()
-    .prepare('UPDATE cv_versions SET generated_jds_json = ? WHERE id = ?')
-    .run(JSON.stringify(generatedJds), cvId);
+export function updateCvGeneratedJdsSync(cvId, generatedJdsOrUpdater) {
+  const db = getDb();
+  return withTransaction(db, () => {
+    let nextJds = generatedJdsOrUpdater;
+    if (typeof generatedJdsOrUpdater === 'function') {
+      const row = db.prepare('SELECT generated_jds_json FROM cv_versions WHERE id = ?').get(cvId);
+      const current = row ? JSON.parse(row.generated_jds_json || '[]') : [];
+      nextJds = generatedJdsOrUpdater(Array.isArray(current) ? current : []);
+    }
+    db.prepare('UPDATE cv_versions SET generated_jds_json = ? WHERE id = ?').run(JSON.stringify(nextJds), cvId);
+    return nextJds;
+  });
 }
 
 export async function activateCvVersion(id) {
   const db = getDb();
   withTransaction(db, () => {
+    const exists = db.prepare('SELECT 1 FROM cv_versions WHERE id = ?').get(id);
+    if (!exists) {
+      const err = new Error(`CV version not found: ${id}`);
+      err.statusCode = 404;
+      throw err;
+    }
     db.prepare('UPDATE cv_versions SET is_active = 0').run();
     db.prepare('UPDATE cv_versions SET is_active = 1 WHERE id = ?').run(id);
   });
@@ -469,11 +627,18 @@ export function getStudentMemorySync() {
 }
 
 export function saveStudentMemorySync(mem) {
+  const rawCm = mem.cognitiveMap && typeof mem.cognitiveMap === 'object' && !Array.isArray(mem.cognitiveMap) ? mem.cognitiveMap : {};
+  const cleanCm = {
+    thinkingStyle: String(rawCm.thinkingStyle ?? DEFAULT_STUDENT_MEMORY.cognitiveMap.thinkingStyle).trim().slice(0, 120),
+    explanationPreference: String(rawCm.explanationPreference ?? DEFAULT_STUDENT_MEMORY.cognitiveMap.explanationPreference).trim().slice(0, 140),
+    tonePreference: String(rawCm.tonePreference ?? DEFAULT_STUDENT_MEMORY.cognitiveMap.tonePreference).trim().slice(0, 120),
+    summary: String(rawCm.summary ?? DEFAULT_STUDENT_MEMORY.cognitiveMap.summary).trim().slice(0, 260)
+  };
   const clean = {
-    hobbies: Array.isArray(mem.hobbies) ? [...new Set(mem.hobbies.map((s) => String(s).trim()).filter(Boolean))].slice(0, 14) : [],
-    facts: Array.isArray(mem.facts) ? [...new Set(mem.facts.map((s) => String(s).trim()).filter(Boolean))].slice(0, 14) : [],
+    hobbies: Array.isArray(mem.hobbies) ? [...new Set(mem.hobbies.map((s) => String(s).trim().slice(0, 80)).filter(Boolean))].slice(0, 14) : [],
+    facts: Array.isArray(mem.facts) ? [...new Set(mem.facts.map((s) => String(s).trim().slice(0, 220)).filter(Boolean))].slice(0, 14) : [],
     topicScores: Array.isArray(mem.topicScores) ? mem.topicScores.slice(0, 16) : [],
-    cognitiveMap: { ...DEFAULT_STUDENT_MEMORY.cognitiveMap, ...(mem.cognitiveMap || {}) },
+    cognitiveMap: cleanCm,
     recentAngles: Array.isArray(mem.recentAngles) ? mem.recentAngles.slice(0, 8) : [],
     updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' ')
   };
@@ -501,6 +666,7 @@ export function saveStudentMemorySync(mem) {
 }
 
 export function resetStudentMemorySync() {
+  memoryResetGeneration += 1;
   getDb().prepare('DELETE FROM student_memory WHERE id = 1').run();
   return getStudentMemorySync();
 }

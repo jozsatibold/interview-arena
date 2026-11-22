@@ -12,10 +12,16 @@ import {
 import {
   stripThinkBlocks,
   extractJsonSafe,
+  parseJsonObjectStrict,
   findCoachMarker,
   pickRecommendedPlannerModels,
   pickVisionModels
 } from '../server/ollama.mjs';
+import { extractCoachMeta } from '../server/chat-service.mjs';
+import { createAvatarMotionState, reportUserMicLevel, inferEarlyExpression } from '../app/modules/avatar-motion.js';
+import { computeCallSpeechMetrics } from '../shared/speech-metrics.mjs';
+import { isScreenShareAllowedTopic, getArtifactsForTopic, findArtifactById } from '../shared/interview-artifacts.mjs';
+import { buildTurnContextAddendum } from '../server/pacing.mjs';
 import {
   PERSONALITY_DIMENSIONS,
   FIXED_TUTOR_PERSONALITY,
@@ -140,8 +146,17 @@ test('interview pacing enforces warm-up, smooth agenda intro, bridged exploratio
   assert.ok(/BRIDGE smoothly/i.test(p2.pacingBlock));
 
   const p4 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 4, firstName: 'Alex' });
-  assert.equal(p4.phase, 'closing');
-  assert.ok(/practical alignment/i.test(p4.pacingBlock));
+  assert.equal(p4.phase, 'explore');
+  const p7 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 7, firstName: 'Alex' });
+  assert.equal(p7.phase, 'reverse_qa');
+  assert.ok(/questions do you have for me/i.test(p7.pacingBlock));
+
+  const pTimed = buildInterviewPacingDirectives({ action: 'turn', topic: 'Technical', userTurns: 3, elapsedSeconds: 600, targetDurationSeconds: 720, firstName: 'Alex' });
+  assert.equal(pTimed.phase, 'reverse_qa');
+
+  const p8 = buildInterviewPacingDirectives({ action: 'turn', topic: 'HR', userTurns: 8, firstName: 'Alex' });
+  assert.equal(p8.phase, 'closing');
+  assert.ok(/practical details|wrapping up/i.test(p8.pacingBlock));
 });
 
 test('LLM size scraper and context tier optimizer classify Small/Medium/Large and trim history', () => {
@@ -252,4 +267,114 @@ test('random company picker avoids CV employers and anchors interviewer identity
   const skeptical = getExpressionTargets('skeptical');
   assert.ok(skeptical.smileBias < 0 && skeptical.browRaiseL > skeptical.browRaiseR);
   assert.deepEqual(getExpressionTargets('nonexistent'), getExpressionTargets('warm'));
+});
+
+test('extractCoachMeta & findCoachMarker parse delimited and delimiter-less coach JSON cleanly', () => {
+  const delimited = 'Great point!\n---COACH_JSON---\n{"expression":"curious","coachPause":false,"grammarFixes":[],"microTipHu":"Jó"}';
+  const delim = findCoachMarker(delimited);
+  assert.ok(delim.idx > 0);
+  const parsedDelim = extractCoachMeta(extractJsonSafe(delimited.slice(delim.idx + delim.markerLen)));
+  assert.equal(parsedDelim.expression, 'curious');
+
+  const rawMarker = 'That makes sense. {"expression":"amused","coachPause":false,"grammarFixes":[],"microTipHu":"Ok"}';
+  const raw = findCoachMarker(rawMarker);
+  assert.ok(raw.idx > 0);
+  const parsedRaw = extractCoachMeta(extractJsonSafe(rawMarker.slice(raw.idx + raw.markerLen)));
+  assert.equal(rawMarker.slice(0, raw.idx).trim(), 'That makes sense.');
+  assert.equal(parsedRaw.expression, 'amused');
+});
+
+test('parseJsonObjectStrict extracts balanced JSON objects and rejects arrays or invalid text', () => {
+  const obj = parseJsonObjectStrict('Here is your result:\n{"score": 9, "nested": {"ok": true}}\nThanks!');
+  assert.deepEqual(obj, { score: 9, nested: { ok: true } });
+  assert.equal(parseJsonObjectStrict('[1, 2, 3]'), null);
+  assert.equal(parseJsonObjectStrict('not json'), null);
+});
+
+test('normalizeInterviewTranscript only rewrites interview-specific terms in interview mode', () => {
+  const txt = 'I worked with front and and next js using type script and exhaust map.';
+  const interviewNormalized = normalizeInterviewTranscript(txt, { mode: 'interview' });
+  assert.ok(interviewNormalized.includes('frontend'));
+  assert.ok(interviewNormalized.includes('Next.js'));
+  assert.ok(interviewNormalized.includes('TypeScript'));
+  assert.ok(interviewNormalized.includes('exhaustMap'));
+
+  const tutorRaw = normalizeInterviewTranscript('Let us talk about front and and next js.', { mode: 'tutor' });
+  assert.equal(tutorRaw, 'Let us talk about front and and next js.');
+});
+
+test('personality dimensions & cyclePersonalityTrait respect HR focusLens exclusions', () => {
+  assert.ok(PERSONALITY_DIMENSIONS.length >= 10);
+  const cycled = cyclePersonalityTrait({ warmth: 'warm', focusLens: 'ownership' }, 'focusLens', 'HR');
+  assert.ok(cycled && cycled.traits.focusLens);
+  assert.notEqual(cycled.traits.focusLens, 'architecture-drill');
+});
+
+test('avatar motion engine produces smooth posture lean, listening nod, and early expression cues', () => {
+  assert.equal(inferEarlyExpression('Haha, I love that example!', 'warm'), 'amused');
+  assert.equal(inferEarlyExpression('Wait, are you sure that scaled?', 'warm'), 'skeptical');
+  assert.equal(inferEarlyExpression('Why did you pick that architecture?', 'warm'), 'curious');
+
+  const stepMotion = createAvatarMotionState();
+  reportUserMicLevel(0.4);
+  const frame = stepMotion({
+    now: performance.now() + 120,
+    dt: 0.016,
+    mode: 'listening',
+    expression: 'curious',
+    targetViseme: { open: 0, width: 0, round: 0 }
+  });
+  assert.ok(frame.leanScale > 1.0);
+  assert.ok(Number.isFinite(frame.nodY));
+});
+
+test('computeCallSpeechMetrics computes WPM, fillers, talk ratio, and typed fallback cleanly', () => {
+  const voiceMetrics = computeCallSpeechMetrics({
+    messages: [
+      { role: 'assistant', content: 'Tell me about your recent project.' },
+      { role: 'user', content: 'Um like basically we migrated twenty components to React and actually improved LCP by forty percent over two quarters.' }
+    ],
+    userSpeakMs: 8000,
+    aiSpeakMs: 4000,
+    turnDurationsMs: [8000]
+  });
+  assert.equal(voiceMetrics.userWords, 19);
+  assert.equal(voiceMetrics.wpm, 143);
+  assert.equal(voiceMetrics.fillerCount, 4);
+  assert.equal(voiceMetrics.userTalkPct, 67);
+  assert.equal(voiceMetrics.aiTalkPct, 33);
+  assert.equal(voiceMetrics.avgTurnSec, 8);
+
+  const typed = computeCallSpeechMetrics({
+    messages: [{ role: 'assistant', content: 'Hello there.' }, { role: 'user', content: 'Hi I am ready to discuss architecture.' }],
+    userSpeakMs: 0,
+    aiSpeakMs: 0
+  });
+  assert.equal(typed.wpm, null);
+  assert.equal(typed.wpmBand, 'Typed mode');
+
+  const empty = computeCallSpeechMetrics();
+  assert.equal(empty.userWords, 0);
+  assert.equal(empty.userTalkPct, 50);
+});
+
+test('interview screen-share artifacts are restricted to tech topics and build clean prompt addenda', () => {
+  assert.equal(isScreenShareAllowedTopic('HR'), false);
+  assert.equal(isScreenShareAllowedTopic('Behavioral'), false);
+  assert.equal(isScreenShareAllowedTopic('Technical'), true);
+  assert.equal(isScreenShareAllowedTopic('System Design'), true);
+  assert.equal(getArtifactsForTopic('HR').length, 0);
+  assert.ok(getArtifactsForTopic('Technical').length >= 2);
+
+  const art = findArtifactById('ts-checkout-race');
+  assert.ok(art && art.lines.length > 5);
+  const addendum = buildTurnContextAddendum({
+    interrupted: true,
+    screenShareArtifact: art,
+    highlightedLines: [6, 7],
+    artifactNotes: 'Missing AbortController'
+  });
+  assert.match(addendum, /BARGE-IN/);
+  assert.match(addendum, /Candidate highlighted line\(s\): 6, 7/);
+  assert.match(addendum, /Missing AbortController/);
 });

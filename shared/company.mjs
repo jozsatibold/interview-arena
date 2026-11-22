@@ -74,7 +74,7 @@ export function pickRandomCompanyName(excludedText = '', avoidCompany = '') {
     const p = SYNTHETIC_PREFIXES[Math.floor(Math.random() * SYNTHETIC_PREFIXES.length)];
     const s = SYNTHETIC_SUFFIXES[Math.floor(Math.random() * SYNTHETIC_SUFFIXES.length)];
     const combo = `${p}${s} Group`;
-    if (!companyAppearsInText(combo, excludedText)) return combo;
+    if ((!avoidLower || combo.toLowerCase() !== avoidLower) && !companyAppearsInText(combo, excludedText)) return combo;
   }
   return 'Kestrel Horizon Systems';
 }

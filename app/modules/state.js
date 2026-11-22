@@ -43,6 +43,7 @@ export const state = {
   selectedLogicPuzzleId: null,
   selectedLogicTeacherId: 'tutor-sarah',
   scratchpadOpen: false,
+  screenShareOpen: false,
   lastSentScratchpadText: '',
   logicTimerSeconds: 600,
   logicTimerTotalSeconds: 600,
@@ -90,7 +91,7 @@ export function initDialogFallbacks() {
 
 export function getCandidateIdentity() {
   if (state.activeSession?.guestMode) {
-    return { fullName: 'Guest', firstName: 'Guest', initials: 'G', isBaseline: false };
+    return { fullName: 'Guest', firstName: 'Guest', initials: 'G' };
   }
   const fullName = String(state.activeCv?.profile?.candidateName || 'Candidate').trim() || 'Candidate';
   const parts = fullName.split(/\s+/).filter(Boolean);
@@ -101,8 +102,7 @@ export function getCandidateIdentity() {
   return {
     fullName,
     firstName,
-    initials,
-    isBaseline: false
+    initials
   };
 }
 
@@ -125,6 +125,13 @@ export function wireDropzone(zoneEl, onFiles) {
     e.preventDefault();
     zoneEl.classList.remove('is-dragover');
     if (e.dataTransfer?.files?.length) onFiles(e.dataTransfer.files);
+  });
+  zoneEl.addEventListener('keydown', (e) => {
+    if (e.target !== zoneEl) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      zoneEl.querySelector('input[type="file"]')?.click();
+    }
   });
 }
 

@@ -1,16 +1,34 @@
-import { apiJson } from './components.js';
+import { apiJson, esc } from './components.js';
 import { $, $$, state, initDialogFallbacks, syncCandidateIdentity } from './modules/state.js';
 import { updateAvatarStage } from './modules/avatar.js';
-import { populateVoiceSelect, initSpeechRecognition } from './modules/voice-media.js';
+import { populateVoiceSelect, initSpeechRecognition, stopMicMeter, stopMediaStream } from './modules/voice-media.js';
 import { stopLobbyMicTest, wireLobbyEvents } from './modules/lobby.js';
-import { startSession, sendChatTurn, wireArenaEvents } from './modules/call-arena.js';
+import { startSession, sendChatTurn, endCallCleanup, wireArenaEvents } from './modules/call-arena.js';
 import { renderHud, renderStats, renderMistakes, wireStatsAndShopEvents } from './modules/stats-shop.js';
 import { renderHome, renderSettingsPage, wireDashboardAndSettingsEvents } from './modules/dashboard.js';
 import { renderJdImagePreviews, loadCustomInterviews, wireTargetsEvents } from './modules/targets.js';
 import { renderTutorStudio, refreshTutorMemory, wirePracticeEvents } from './modules/practice.js';
 import { renderAboutMe, wireCvAndOnboardingEvents } from './modules/cv-onboarding.js';
 
+let currentViewId = 'view-path';
+
 export function switchToView(viewId) {
+  const prevView = currentViewId;
+  if (prevView !== viewId) {
+    if (prevView === 'view-lobby') {
+      stopLobbyMicTest();
+      if (viewId !== 'view-arena') {
+        stopMicMeter();
+        stopMediaStream();
+        state.lobbyCfg = null;
+      }
+    }
+    if (prevView === 'view-arena') {
+      endCallCleanup();
+    }
+  }
+  currentViewId = viewId;
+
   const applyDomUpdate = () => {
     for (const view of $$('.spa-view')) {
       const isTarget = view.id === viewId;
@@ -31,6 +49,7 @@ export function switchToView(viewId) {
   const afterTransition = () => {
     document.getElementById(viewId)?.focus({ preventScroll: true });
     if (viewId === 'view-practice' && !$('#practice-guest-toggle')?.checked) refreshTutorMemory();
+    if (viewId === 'view-lobby' || viewId === 'view-arena') updateAvatarStage();
   };
 
   if (!document.startViewTransition) {
@@ -38,7 +57,7 @@ export function switchToView(viewId) {
     afterTransition();
     return;
   }
-  document.startViewTransition(() => applyDomUpdate()).finished.finally(afterTransition);
+  document.startViewTransition(() => applyDomUpdate()).finished.catch(() => {}).finally(afterTransition);
 }
 
 export function applyCvCatalogBundle(data) {
@@ -81,32 +100,38 @@ async function bootstrap() {
   wirePracticeEvents();
   wireCvAndOnboardingEvents({ switchToView, applyCvCatalogBundle });
 
-  const [userData, catData, setupData] = await Promise.all([
-    apiJson('/api/state', null, 'GET'),
-    apiJson('/api/catalog', null, 'GET'),
-    apiJson('/api/setup-status', null, 'GET')
-  ]);
-  state.user = userData;
-  state.catalog = catData;
-  state.setup = setupData;
-  state.activeCv = catData.activeCv || null;
-  state.cvVersions = catData.cvVersions || [];
-  state.needsOnboarding = Boolean(catData.needsOnboarding || !state.activeCv);
-  document.body.classList.toggle('is-onboarding', state.needsOnboarding);
+  try {
+    const [userData, catData, setupData] = await Promise.all([
+      apiJson('/api/state', null, 'GET'),
+      apiJson('/api/catalog', null, 'GET'),
+      apiJson('/api/setup-status', null, 'GET')
+    ]);
+    state.user = userData;
+    state.catalog = catData;
+    state.setup = setupData;
+    state.activeCv = catData.activeCv || null;
+    state.cvVersions = catData.cvVersions || [];
+    state.needsOnboarding = Boolean(catData.needsOnboarding || !state.activeCv);
+    document.body.classList.toggle('is-onboarding', state.needsOnboarding);
 
-  populateVoiceSelect();
-  syncCandidateIdentity();
-  renderHud();
-  renderSettingsPage();
-  renderAboutMe();
-  renderTutorStudio();
-  renderHome();
-  renderStats();
-  renderMistakes();
-  renderJdImagePreviews();
-  updateAvatarStage();
-  await loadCustomInterviews();
-  if (state.needsOnboarding) switchToView('view-onboarding');
+    populateVoiceSelect();
+    syncCandidateIdentity();
+    renderHud();
+    renderSettingsPage();
+    renderAboutMe();
+    renderTutorStudio();
+    renderHome();
+    renderStats();
+    renderMistakes();
+    renderJdImagePreviews();
+    updateAvatarStage();
+    await loadCustomInterviews();
+    if (state.needsOnboarding) switchToView('view-onboarding');
+  } catch (err) {
+    console.error('[bootstrap] Failed to initialize studio:', err);
+    const pathEl = $('#daily-path-grid') || $('#path-summary');
+    if (pathEl) pathEl.innerHTML = `<div class="coach-pause-card"><h4>⚠️ Failed to initialize Studio</h4><p>${esc(err.message)}</p></div>`;
+  }
 }
 
 bootstrap();

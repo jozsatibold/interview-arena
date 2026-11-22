@@ -27,13 +27,44 @@ export function renderHud() {
   $('#pu-retry-count').textContent = u.powerUps?.doubleXpRetry ?? 0;
 }
 
-export function showScorecardDialog(sc, xpEarned) {
+export function showScorecardDialog(sc, xpEarned, extra = {}) {
   const s = sc.subScores || {};
+  const m = extra?.speechMetrics || null;
+  const deferred = Array.isArray(extra?.deferredCoachItems) ? extra.deferredCoachItems : [];
+
+  const metricsHtml = m
+    ? `<div class="scorecard-metrics-strip">
+        <div class="kpi-card"><small>Pace (WPM)</small><strong>${m.wpm ? `${esc(m.wpm)} WPM` : 'Typed'}</strong><span class="muted">${esc(m.wpmBand)}</span></div>
+        <div class="kpi-card"><small>Talk Ratio (You / AI)</small><strong>${esc(m.userTalkPct)}% / ${esc(m.aiTalkPct)}%</strong><span class="muted">${esc(m.userWords)} words spoken</span></div>
+        <div class="kpi-card"><small>Filler Words</small><strong>${esc(m.fillerCount)} (${esc(m.fillersPer100Words)}/100w)</strong><span class="muted">${m.topFillers?.length ? esc(m.topFillers.map((f) => `${f.label}×${f.count}`).join(', ')) : 'Clean delivery'}</span></div>
+        <div class="kpi-card"><small>Avg Answer Length</small><strong>${esc(m.avgTurnSec || 0)}s</strong><span class="muted">Max ${esc(m.longestTurnSec || 0)}s</span></div>
+      </div>`
+    : '';
+
+  const questionsNoteHtml = sc.candidateQuestionsNote
+    ? `<div class="coach-tip-card" style="margin-top:0.5rem;"><strong>❓ Candidate Questions Evaluation:</strong><p style="margin:0.2rem 0 0 0;">${esc(sc.candidateQuestionsNote)}</p></div>`
+    : '';
+
+  const deferredHtml = deferred.length
+    ? `<div style="margin-top:0.65rem;">
+        <h3>📋 Collected Live Coaching Notes (${esc(deferred.length)})</h3>
+        <div class="deferred-coach-list">${deferred.slice(0, 12).map((item) => {
+          if (item.kind === 'fix') {
+            return `<div class="coach-grammar-card"><p class="grammar-said">❌ "${esc(item.data.said)}"</p><p class="grammar-better">✅ "${esc(item.data.better)}"</p>${item.data.why ? `<small class="grammar-why">${esc(item.data.why)}</small>` : ''}</div>`;
+          }
+          if (item.kind === 'pause') {
+            return `<div class="coach-pause-card"><h4>${esc(item.data.category || 'Upgrade')}</h4><p>"${esc(item.data.original)}" → <strong>"${esc(item.data.seniorUpgrades?.[0] || '')}"</strong></p></div>`;
+          }
+          return `<div class="coach-tip-card"><p style="margin:0;">💡 ${esc(item.data)}</p></div>`;
+        }).join('')}</div>
+      </div>`
+    : '';
+
   $('#scorecard-content').innerHTML = `
     <div class="hero-banner" style="margin-bottom:0.5rem;">
       <div>
         <h2>${esc(sc.totalScore)} / 10 — ${esc(sc.percentile)}</h2>
-        <p>Verdict: <strong>${esc(sc.verdict)}</strong> • Earned <strong>+${xpEarned} XP</strong></p>
+        <p>Verdict: <strong>${esc(sc.verdict)}</strong> • Earned <strong>+${esc(xpEarned)} XP</strong></p>
       </div>
     </div>
     <div class="stats-summary-grid">
@@ -42,6 +73,8 @@ export function showScorecardDialog(sc, xpEarned) {
       <div class="kpi-card"><small>Tech Depth &amp; ROI</small><strong>${esc(s.techRoi)}/10</strong></div>
       <div class="kpi-card"><small>Confidence</small><strong>${esc(s.confidence)}/10</strong></div>
     </div>
+    ${metricsHtml}
+    ${questionsNoteHtml}
     <div>
       <h3>✅ What Worked Well</h3>
       <ul>${(sc.strengths || sc.strengthsHu || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
@@ -50,6 +83,7 @@ export function showScorecardDialog(sc, xpEarned) {
       <h3>🚀 3 Golden Senior Sentences to Memorize</h3>
       <ul>${(sc.goldenSentences || []).map((x) => `<li><strong>"${esc(x)}"</strong></li>`).join('')}</ul>
     </div>
+    ${deferredHtml}
   `;
   $('#scorecard-dialog').showModal();
 }
@@ -86,12 +120,12 @@ export function renderShopModal(statusMsg = '', isError = false) {
         <article class="shop-card" data-item-id="${esc(item.id)}">
           <div class="shop-card-head">
             <span class="shop-item-title">${esc(item.icon)} ${esc(item.name)}</span>
-            <span class="shop-owned-pill">Owned: <strong>${owned}</strong></span>
+            <span class="shop-owned-pill">Owned: <strong>${esc(owned)}</strong></span>
           </div>
           <p class="shop-item-desc">${esc(item.description)}</p>
           <div class="shop-buy-row">
-            <button type="button" class="btn btn-buy-xp" data-buy-id="${esc(item.id)}" data-currency="xp" ${canXp ? '' : 'disabled'}>⚡ Buy (${item.xpCost} XP)</button>
-            <button type="button" class="btn btn-buy-gems" data-buy-id="${esc(item.id)}" data-currency="gems" ${canGem ? '' : 'disabled'}>💎 Buy (${item.gemCost})</button>
+            <button type="button" class="btn btn-buy-xp" data-buy-id="${esc(item.id)}" data-currency="xp" ${canXp ? '' : 'disabled'}>⚡ Buy (${esc(item.xpCost)} XP)</button>
+            <button type="button" class="btn btn-buy-gems" data-buy-id="${esc(item.id)}" data-currency="gems" ${canGem ? '' : 'disabled'}>💎 Buy (${esc(item.gemCost)})</button>
           </div>
         </article>
       `;

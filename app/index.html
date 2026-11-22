@@ -261,7 +261,7 @@
             <span class="proc-time-pill is-pct"><strong id="proc-percent-label">5%</strong></span>
           </div>
 
-          <progress id="proc-progress-bar" class="proc-progress-bar" max="100" value="5"></progress>
+          <progress id="proc-progress-bar" class="proc-progress-bar" max="100" value="5" aria-label="CV Analysis Progress"></progress>
 
           <div id="proc-live-detail" class="proc-live-detail" aria-live="polite">Initializing local AI analyzer...</div>
 
@@ -391,10 +391,25 @@
             <int-select control-id="lobby-personality-select" label="🎲 Interviewer Personality (11 Moderate Traits)" action-id="btn-reroll-personality" action-label="🎲 Re-Roll All" action-variant="ghost"></int-select>
             <div id="lobby-personality-traits" class="lobby-trait-grid" aria-label="11 Interviewer Personality Dimensions (click a trait to adjust)"></div>
             <p id="lobby-personality-tip" class="lobby-personality-tip muted"></p>
-            <label class="voice-toggle" style="margin-top:0.35rem;">
-              <input type="checkbox" id="lobby-continuous-toggle" checked>
-              <span>💬 Continuous Conversation Mode (recommended for HR)</span>
-            </label>
+            <div class="lobby-call-prefs">
+              <div class="field-group" style="margin:0;">
+                <label class="field-label" for="lobby-duration-select">⏱️ Target Call Length</label>
+                <select id="lobby-duration-select" class="full-input">
+                  <option value="8">8 min (Quick Screening)</option>
+                  <option value="12" selected>12 min (Standard + Reverse Q&amp;A)</option>
+                  <option value="15">15 min (Deep Dive)</option>
+                  <option value="25">25 min (Full Loop)</option>
+                </select>
+              </div>
+              <label class="voice-toggle" style="margin-top:0.35rem;">
+                <input type="checkbox" id="lobby-continuous-toggle" checked>
+                <span>💬 Continuous Conversation Mode (recommended for HR)</span>
+              </label>
+              <label class="voice-toggle" style="margin-top:0.2rem;">
+                <input type="checkbox" id="lobby-exam-toggle">
+                <span>🎯 Real Interview (Exam) Mode — hide live coach cards until end</span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -443,26 +458,26 @@
           <div class="call-stage-topbar">
             <div class="call-participant-chip">
               <span id="avatar-role-badge" class="badge">HR Screening</span>
-              <strong id="avatar-name">Maya · Talent Partner</strong>
-              <span id="arena-subtitle" class="muted call-model-meta"></span>
+              <span class="live-meeting-pill" title="Call Elapsed Time">
+                <span class="live-dot-sm" aria-hidden="true"></span>
+                <strong id="call-elapsed-timer">00:00</strong>
+              </span>
+              <span id="exam-mode-pill" class="badge badge-gold" hidden>🎯 Exam Mode</span>
             </div>
             <div class="call-status-group">
-              <span id="arena-personality-badge" class="badge">🎲 Mood</span>
               <span id="avatar-status-pill" class="avatar-status-pill">👀 Watching</span>
-              <label class="call-mini-toggle" title="Show 3D Interviewer &amp; Voice">
-                <input type="checkbox" id="auto-speak-toggle" checked>
-                <span>🎙️ Voice</span>
-              </label>
-              <label class="call-mini-toggle" title="Keep HR conversations flowing continuously">
-                <input type="checkbox" id="continuous-flow-toggle" checked>
-                <span>💬 Continuous</span>
-              </label>
-              <select id="arena-voice-select" class="compact-voice-select" aria-label="Interviewer Voice Preset"></select>
-              <int-button control-id="btn-call-back" variant="dark-ghost" label="← Path"></int-button>
+              <button type="button" id="mic-mode-badge" class="badge call-mode-chip" title="Microphone mode (click to pause/resume in Hands-Free)">🎙️ Manual Mic</button>
+              <span class="badge call-hd-pill" aria-hidden="true">HD</span>
             </div>
           </div>
 
           <div class="call-video-canvas">
+            <div id="call-connecting-overlay" class="call-connecting-overlay" hidden aria-live="polite">
+              <div class="connecting-ring" aria-hidden="true"></div>
+              <strong id="call-connecting-label">Connecting to interviewer...</strong>
+              <small class="muted">Joining private encrypted studio</small>
+            </div>
+
             <div class="voice-rings" aria-hidden="true">
               <span></span>
               <span></span>
@@ -495,6 +510,15 @@
 
             <div id="call-avatar-mount" class="call-avatar-mount"></div>
 
+            <div class="interviewer-nameplate">
+              <div id="interviewer-eq-bars" class="voice-eq-bars" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <strong id="avatar-name">Maya · Talent Partner</strong>
+            </div>
+
+            <div id="call-cc-bar" class="call-cc-bar" hidden aria-live="polite"></div>
+
             <div class="call-caption-hint">
               <small id="avatar-persona-hint">Continuous natural dialogue</small>
             </div>
@@ -504,7 +528,10 @@
               <div id="call-video-fallback" class="cam-fallback is-compact">
                 <div id="arena-self-initials" class="cam-initials">CA</div>
               </div>
-              <span id="arena-self-nameplate" class="pip-nameplate">You</span>
+              <span class="pip-nameplate">
+                <span id="self-mic-indicator" class="self-mic-dot" aria-hidden="true"></span>
+                <span id="arena-self-nameplate">You</span>
+              </span>
             </div>
           </div>
 
@@ -517,11 +544,15 @@
             <span class="live-dot" aria-hidden="true"></span>
             <strong>Speaking live:</strong>
             <span id="live-stt-text">Listening...</span>
+            <div id="vad-countdown-bar" class="vad-countdown-bar" hidden title="Sending automatically after brief pause"></div>
           </div>
 
           <div class="call-dock" role="toolbar" aria-label="Call Controls">
             <int-button control-id="mic-btn" variant="mic" btn-class="btn-call-speak" label="🎙️ Speak English"></int-button>
             <int-button control-id="btn-toggle-cam" variant="dark-pill" label="📷 Cam Off"></int-button>
+            <button type="button" id="btn-toggle-cc" class="btn btn-dark-pill" aria-pressed="true" title="Toggle Live Closed Captions (CC)">💬 CC</button>
+            <button type="button" id="btn-toggle-layout" class="btn btn-dark-pill" aria-pressed="false" title="Toggle Spotlight vs 50/50 Split View">◫ Split</button>
+            <button type="button" id="btn-toggle-screenshare" class="btn btn-dark-pill" aria-expanded="false" aria-controls="call-screenshare-panel" hidden>🖥️ Screen</button>
             <int-button control-id="btn-toggle-scratchpad" variant="dark-pill" aria-expanded="false" aria-controls="call-scratchpad-panel" hidden>
               <span>📝 Scratchpad</span>
             </int-button>
@@ -529,11 +560,69 @@
               <span>💬 Chat</span>
               <span id="chat-unread-badge" class="chat-unread-badge" hidden>0</span>
             </int-button>
+            <button type="button" id="btn-call-more" class="btn btn-dark-pill" popovertarget="call-more-popover" aria-label="Call Settings &amp; Voice Options" title="Call Settings, Voice &amp; AI Options">⋯ More</button>
             <int-button control-id="btn-finish-eval" variant="gold" label="📊 Score (1–10)"></int-button>
             <int-button control-id="btn-hangup" variant="hangup" label="📞 End Call"></int-button>
           </div>
+
+          <div id="call-more-popover" popover="auto" class="call-more-popover" aria-label="Call Options">
+            <div class="more-pop-head">
+              <strong>⚙️ Call &amp; Simulation Options</strong>
+              <span id="arena-personality-badge" class="badge">🎲 Mood</span>
+            </div>
+            <small id="arena-subtitle" class="muted"></small>
+            <label class="more-pop-field">
+              <span>🎙️ Mic Turn Mode</span>
+              <select id="call-mic-mode-select" class="full-input">
+                <option value="manual">Manual Click</option>
+                <option value="ptt">Hold Spacebar (Push-to-Talk)</option>
+                <option value="handsfree">Hands-Free Auto (VAD)</option>
+              </select>
+            </label>
+            <label class="more-pop-field">
+              <span>🗣️ Interviewer Voice</span>
+              <select id="arena-voice-select" class="full-input" aria-label="Interviewer Voice Preset"></select>
+            </label>
+            <label class="more-pop-check">
+              <input type="checkbox" id="auto-speak-toggle" checked>
+              <span>🔊 Interviewer Audio &amp; Avatar</span>
+            </label>
+            <label class="more-pop-check">
+              <input type="checkbox" id="continuous-flow-toggle" checked>
+              <span>💬 Continuous Dialogue Flow</span>
+            </label>
+            <label class="more-pop-check">
+              <input type="checkbox" id="call-exam-toggle">
+              <span>🎯 Real Interview (Exam) Mode</span>
+            </label>
+            <label class="more-pop-check">
+              <input type="checkbox" id="call-ambient-toggle">
+              <span>🎧 Subtle Office Room Tone</span>
+            </label>
+            <div class="more-pop-actions">
+              <int-button control-id="btn-call-back" variant="ghost" label="← Back to Path"></int-button>
+            </div>
+          </div>
+
           <span id="mic-status" class="mic-status-line">Click Speak to talk naturally — Whisper Large-v3-Turbo listens in real time.</span>
         </section>
+
+        <aside id="call-screenshare-panel" class="call-screenshare-panel" hidden aria-label="Interviewer Shared Screen Artifact">
+          <div class="scratchpad-head">
+            <div class="scratchpad-title-row">
+              <strong id="screenshare-title">🖥️ Interviewer is sharing screen</strong>
+            </div>
+            <div class="scratchpad-head-controls">
+              <select id="screenshare-artifact-select" class="compact-voice-select" aria-label="Shared Technical Artifact"></select>
+              <button type="button" id="btn-close-screenshare" class="icon-close" aria-label="Close shared screen">✕</button>
+            </div>
+          </div>
+          <p id="screenshare-hint" class="muted" style="margin:0.35rem 0.75rem;font-size:0.8rem;"></p>
+          <div id="screenshare-code-lines" class="screenshare-code-lines" aria-label="Shared code and brief lines (click lines to highlight)"></div>
+          <div class="screenshare-notes-box">
+            <textarea id="screenshare-notes" class="full-input" rows="2" placeholder="Optional quick notes on this code/architecture (sent to interviewer)..." aria-label="Notes on shared screen"></textarea>
+          </div>
+        </aside>
 
         <aside id="call-scratchpad-panel" class="call-scratchpad-panel" hidden aria-label="Shared Collaborative Logic Scratchpad">
           <div class="scratchpad-head">
@@ -545,8 +634,8 @@
               <div class="logic-timer-pill" aria-label="Puzzle Timer">
                 <span>⏱️</span>
                 <strong id="logic-timer-display">10:00</strong>
-                <button type="button" id="btn-logic-timer-toggle" class="mini-pu-btn" title="Pause or resume timer">⏸</button>
-                <button type="button" id="btn-logic-timer-reset" class="mini-pu-btn" title="Reset timer">↺</button>
+                <button type="button" id="btn-logic-timer-toggle" class="mini-pu-btn" title="Pause or resume timer" aria-label="Pause logic timer">⏸</button>
+                <button type="button" id="btn-logic-timer-reset" class="mini-pu-btn" title="Reset timer" aria-label="Reset logic timer">↺</button>
               </div>
               <span id="scratchpad-sync-pill" class="scratchpad-sync-pill">🟢 Live · Tutor sees edits</span>
               <button type="button" id="btn-close-scratchpad" class="icon-close" aria-label="Hide scratchpad">✕</button>
@@ -556,8 +645,10 @@
           <details id="scratchpad-problem-box" class="scratchpad-problem-box" open>
             <summary>
               <span>📋 Problem Statement &amp; Constraints</span>
-              <button type="button" id="btn-logic-hint" class="btn btn-ghost btn-compact">💡 Gentle Hint</button>
             </summary>
+            <div class="scratchpad-hint-bar" style="display:flex;justify-content:flex-end;margin-block:0.35rem 0.25rem;">
+              <button type="button" id="btn-logic-hint" class="btn btn-ghost btn-compact">💡 Gentle Hint</button>
+            </div>
             <div id="scratchpad-problem-body" class="scratchpad-problem-body"></div>
             <div id="logic-hint-banner" class="logic-hint-banner" hidden></div>
           </details>
@@ -967,6 +1058,27 @@
               label="💬 Continuous Dialogue Flow Default"
               description="Keep dialogue natural while placing English upgrades silently in Coach tips."
               checked
+            ></int-toggle>
+            <int-select control-id="setting-mic-mode" label="🎙️ Default Mic Turn Mode">
+              <option value="manual">Manual Click (Speak → Done &amp; Send)</option>
+              <option value="ptt">Hold Spacebar (Push-to-Talk)</option>
+              <option value="handsfree">Hands-Free Auto (VAD Silence Detection)</option>
+            </int-select>
+            <int-select control-id="setting-default-duration" label="⏱️ Default Interview Target Length">
+              <option value="8">8 min (Quick Screening)</option>
+              <option value="12" selected>12 min (Standard + Reverse Q&amp;A)</option>
+              <option value="15">15 min (Deep Dive)</option>
+              <option value="25">25 min (Full Loop)</option>
+            </int-select>
+            <int-toggle
+              control-id="setting-default-exam"
+              label="🎯 Default Real Interview (Exam) Mode"
+              description="Hide live coaching popups during calls and reveal all notes in the final scorecard."
+            ></int-toggle>
+            <int-toggle
+              control-id="setting-ambient-audio"
+              label="🎧 Subtle Office Room Tone Audio"
+              description="Play gentle, ultra-quiet studio room ambience so pauses feel less sterile."
             ></int-toggle>
 
             <div class="field-group context-tier-group" data-avatar-quality-picker>

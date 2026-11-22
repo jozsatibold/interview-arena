@@ -584,6 +584,7 @@ export function formatFakeJdAsMarkdown(jd) {
   const resp = (jd.responsibilities || []).map((r) => `- ${r}`).join('\n');
   const reqs = (jd.requirements || []).map((r) => `- ${r}`).join('\n');
   return `# ${jd.roleTitle} at ${jd.company}
+**Company:** ${jd.company}
 Compensation / Engagement: ${jd.compensation || 'Competitive Remote'}
 Core Stack: ${(jd.stack || []).join(', ')}
 

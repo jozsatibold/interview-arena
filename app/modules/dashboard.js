@@ -313,6 +313,17 @@ export function renderSettingsPage() {
     $('#setting-default-continuous').dispatchEvent(new Event('change'));
     if ($('#continuous-flow-toggle')) $('#continuous-flow-toggle').checked = defCont;
   }
+  if ($('#setting-mic-mode') && state.user?.micMode) $('#setting-mic-mode').value = state.user.micMode;
+  if ($('#setting-default-duration') && state.user?.defaultDurationMinutes) $('#setting-default-duration').value = String(state.user.defaultDurationMinutes);
+  if ($('#setting-default-exam')) {
+    $('#setting-default-exam').checked = Boolean(state.user?.defaultExamMode);
+    $('#setting-default-exam').dispatchEvent(new Event('change'));
+  }
+  if ($('#setting-ambient-audio')) {
+    $('#setting-ambient-audio').checked = Boolean(state.user?.callAmbientAudio);
+    $('#setting-ambient-audio').dispatchEvent(new Event('change'));
+  }
+  if ($('#call-ambient-toggle')) $('#call-ambient-toggle').checked = Boolean(state.user?.callAmbientAudio);
   updateAvatarStage();
 
   const installedNames = new Set(s.installedModels.map((m) => m.name));
@@ -551,7 +562,11 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
       ttsEngine: $('#tts-engine-select')?.value || 'auto',
       zonosVoice: $('#zonos-voice-select')?.value || 'AmericanFemale',
       defaultAutoSpeak: Boolean($('#setting-default-voice')?.checked ?? true),
-      defaultContinuousFlow: Boolean($('#setting-default-continuous')?.checked ?? true)
+      defaultContinuousFlow: Boolean($('#setting-default-continuous')?.checked ?? true),
+      micMode: $('#setting-mic-mode')?.value || 'manual',
+      defaultDurationMinutes: Number($('#setting-default-duration')?.value || 12),
+      defaultExamMode: Boolean($('#setting-default-exam')?.checked),
+      callAmbientAudio: Boolean($('#setting-ambient-audio')?.checked)
     });
     renderHud();
     renderSettingsPage();

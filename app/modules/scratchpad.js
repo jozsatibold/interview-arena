@@ -26,6 +26,7 @@ export function renderLogicTimer() {
   if (pill) pill.classList.toggle('is-low', state.logicTimerSeconds > 0 && state.logicTimerSeconds <= 60);
   if ($('#btn-logic-timer-toggle')) {
     $('#btn-logic-timer-toggle').textContent = state.logicTimerRunning ? '⏸' : '▶';
+    $('#btn-logic-timer-toggle').setAttribute('aria-label', state.logicTimerRunning ? 'Pause logic timer' : 'Start logic timer');
   }
 }
 
@@ -119,15 +120,28 @@ export function wireScratchpadEvents(onShareNotes) {
   });
   $('#btn-logic-timer-reset')?.addEventListener('click', () => startLogicTimer(state.logicTimerTotalSeconds || 600));
 
-  $('#btn-logic-hint')?.addEventListener('click', async () => {
+  $('#btn-logic-hint')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
     const puzzle = state.activeSession?.logicPuzzle;
-    if (!puzzle) return;
-    const data = await apiJson('/api/practice/logic/hint', { logicPuzzleId: puzzle.id, step: state.logicHintStep });
-    state.logicHintStep = (data.index || 0) + 1;
-    const banner = $('#logic-hint-banner');
-    if (banner) {
-      banner.hidden = false;
-      banner.textContent = `💡 Hint ${data.index + 1}/${Math.max(1, data.total || 1)}: ${data.hint}`;
+    const btn = $('#btn-logic-hint');
+    if (!puzzle || !btn || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const data = await apiJson('/api/practice/logic/hint', { logicPuzzleId: puzzle.id, step: state.logicHintStep });
+      state.logicHintStep = (data.index || 0) + 1;
+      const banner = $('#logic-hint-banner');
+      if (banner) {
+        banner.hidden = false;
+        banner.textContent = `💡 Hint ${data.index + 1}/${Math.max(1, data.total || 1)}: ${data.hint}`;
+      }
+    } catch (err) {
+      const banner = $('#logic-hint-banner');
+      if (banner) {
+        banner.hidden = false;
+        banner.textContent = `⚠️ Could not load hint: ${err.message}`;
+      }
+    } finally {
+      btn.disabled = false;
     }
   });
 

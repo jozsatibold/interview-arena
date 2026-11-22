@@ -69,7 +69,7 @@ export function renderPracticeLogicCatalog() {
     btn.dataset.puzzleId = p.id;
     btn.innerHTML = `
       <div class="logic-card-meta">
-        <span class="logic-diff-pill is-${esc(p.difficulty)}">⏱️ ${p.durationMinutes || 10} min</span>
+        <span class="logic-diff-pill is-${esc(p.difficulty)}">⏱️ ${esc(p.durationMinutes || 10)} min</span>
         <span class="badge">${esc(p.category)}</span>
         ${p.isCustom ? '<span class="badge badge-green">✨ AI</span>' : ''}
       </div>
@@ -78,6 +78,12 @@ export function renderPracticeLogicCatalog() {
     `;
     btn.addEventListener('click', () => {
       state.selectedLogicPuzzleId = p.id;
+      state.logicHintStep = 0;
+      const hintBanner = $('#logic-hint-banner');
+      if (hintBanner) {
+        hintBanner.hidden = true;
+        hintBanner.textContent = '';
+      }
       renderPracticeLogicCatalog();
     });
     grid.appendChild(btn);
@@ -175,10 +181,10 @@ export function renderTutorMemoryCard(mem) {
   const recent = mem.recentAngles || [];
 
   const hobbyHtml = hobbies.length
-    ? hobbies.map((h) => `<span class="hobby-chip">${esc(h)} <button type="button" data-del-hobby="${esc(h)}" title="Remove interest">×</button></span>`).join('')
+    ? hobbies.map((h) => `<span class="hobby-chip">${esc(h)} <button type="button" data-del-hobby="${esc(h)}" title="Remove interest" aria-label="Remove ${esc(h)}">×</button></span>`).join('')
     : '<span class="muted">Mention a hobby or passion in a chat — Sarah/Claire/Hannah will remember it for analogies.</span>';
   const scoresHtml = scores.length
-    ? scores.map((s) => `<div class="topic-score-row"><span>${esc(s.topic)}</span><span class="score-pills-inline"><span class="score-mini-pill" title="Interest level">❤️ ${s.engagement}/10</span><span class="score-mini-pill is-fluency" title="English fluency">🗣️ ${s.fluency}/10</span></span></div>`).join('')
+    ? scores.map((s) => `<div class="topic-score-row"><span>${esc(s.topic)}</span><span class="score-pills-inline"><span class="score-mini-pill" title="Interest level">❤️ ${esc(s.engagement)}/10</span><span class="score-mini-pill is-fluency" title="English fluency">🗣️ ${esc(s.fluency)}/10</span></span></div>`).join('')
     : '<span class="muted">Topics get scored automatically after a few conversation turns.</span>';
   const factsHtml = facts.length
     ? `<ul class="about-sub-list">${facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>`
@@ -257,7 +263,7 @@ export function renderTutorStudio() {
     };
     const svgHtml = buildCharacterSvgHtml(
       { id: teacher.id, avatarName: teacher.avatarName, gender: 'female', badgeText: 'TUTOR', palette: teacher.palette },
-      'tutor', 'female', teacherAppearance
+      `tutor-${teacher.id}`, 'female', teacherAppearance
     );
 
     const card = document.createElement('article');
@@ -273,7 +279,7 @@ export function renderTutorStudio() {
       </div>
       <p class="tutor-bio">${esc(teacher.bio)}</p>
       <div class="tutor-card-actions">
-        <button type="button" class="btn btn-secondary btn-hear-teacher">🔊 Voice</button>
+        <button type="button" class="btn btn-secondary btn-hear-teacher" aria-label="Preview ${esc(teacher.name)}'s voice">🔊 Voice</button>
         <button type="button" class="btn btn-green btn-start-tutor">🎧 Start Lesson ▶</button>
       </div>
     `;
@@ -281,8 +287,7 @@ export function renderTutorStudio() {
     card.querySelector('.btn-hear-teacher')?.addEventListener('click', () => {
       const isGuest = Boolean($('#practice-guest-toggle')?.checked);
       const { firstName } = getCandidateIdentity();
-      state.activeSession.voice = teacher.voice;
-      speakEnglish(`Hi ${isGuest ? 'Guest' : firstName}! I'm ${teacher.name}. Let's relax, chat in English, and polish any grammar slips together!`, { force: true });
+      speakEnglish(`Hi ${isGuest ? 'Guest' : firstName}! I'm ${teacher.name}. Let's relax, chat in English, and polish any grammar slips together!`, { force: true, voice: teacher.voice });
     });
 
     card.querySelector('.btn-start-tutor')?.addEventListener('click', async () => {

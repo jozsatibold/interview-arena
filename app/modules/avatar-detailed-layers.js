@@ -217,7 +217,7 @@ export function drawShouldersAndAttire(ctx, { meta, palette, skin, breathY }) {
   ctx.restore();
 }
 
-export function drawHairFrontAndAccessories(ctx, { meta, appearance, palette, style }) {
+export function drawHairFrontAndAccessories(ctx, { meta, appearance, palette, style, dna = null }) {
   const hairA = palette.hairA || '#4b3123';
   const hairB = palette.hairB || '#22140c';
   const shine = palette.shine || 'rgba(255,255,255,0.22)';
@@ -237,6 +237,15 @@ export function drawHairFrontAndAccessories(ctx, { meta, appearance, palette, st
     ctx.bezierCurveTo(368, 152, 330, 128, 288, 134);
     ctx.bezierCurveTo(238, 140, 198, 162, 160, 212);
     ctx.fill();
+  } else if (style === 'pixie') {
+    ctx.beginPath();
+    ctx.moveTo(164, 202);
+    ctx.bezierCurveTo(166, 98, 224, 66, 284, 68);
+    ctx.bezierCurveTo(346, 70, 396, 106, 396, 196);
+    ctx.bezierCurveTo(368, 138, 330, 120, 294, 128);
+    ctx.lineTo(256, 156);
+    ctx.bezierCurveTo(222, 136, 192, 154, 164, 202);
+    ctx.fill();
   } else if (style === 'ponytail' || style === 'bun') {
     ctx.beginPath();
     ctx.moveTo(162, 204);
@@ -245,13 +254,35 @@ export function drawHairFrontAndAccessories(ctx, { meta, appearance, palette, st
     ctx.bezierCurveTo(358, 142, 314, 122, 280, 122);
     ctx.bezierCurveTo(246, 122, 202, 142, 162, 204);
     ctx.fill();
-  } else if (style === 'quiff' || style === 'spiky') {
+  } else if (style === 'quiff') {
     ctx.beginPath();
     ctx.moveTo(162, 208);
     ctx.bezierCurveTo(154, 100, 214, 48, 290, 50);
     ctx.bezierCurveTo(366, 52, 408, 102, 396, 204);
     ctx.bezierCurveTo(374, 146, 332, 118, 276, 124);
     ctx.bezierCurveTo(222, 129, 188, 154, 162, 208);
+    ctx.fill();
+  } else if (style === 'spiky') {
+    ctx.beginPath();
+    ctx.moveTo(164, 204);
+    ctx.lineTo(176, 116);
+    ctx.lineTo(212, 82);
+    ctx.lineTo(244, 52);
+    ctx.lineTo(278, 74);
+    ctx.lineTo(312, 48);
+    ctx.lineTo(342, 82);
+    ctx.lineTo(382, 108);
+    ctx.lineTo(396, 202);
+    ctx.bezierCurveTo(364, 144, 326, 122, 280, 126);
+    ctx.bezierCurveTo(234, 122, 194, 146, 164, 204);
+    ctx.fill();
+  } else if (style === 'slick') {
+    ctx.beginPath();
+    ctx.moveTo(164, 200);
+    ctx.bezierCurveTo(166, 98, 218, 72, 280, 72);
+    ctx.bezierCurveTo(342, 72, 394, 98, 396, 200);
+    ctx.bezierCurveTo(364, 134, 324, 118, 280, 118);
+    ctx.bezierCurveTo(236, 118, 196, 134, 164, 200);
     ctx.fill();
   } else {
     ctx.beginPath();
@@ -265,19 +296,20 @@ export function drawHairFrontAndAccessories(ctx, { meta, appearance, palette, st
     ctx.fill();
   }
 
+  const strandShift = ((dna?.hairSeed || 0) % 21) - 10;
   ctx.strokeStyle = shine;
   ctx.lineWidth = 7;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(208, 104);
-  ctx.quadraticCurveTo(278, 76, 344, 102);
+  ctx.moveTo(208 + strandShift * 0.4, 104);
+  ctx.quadraticCurveTo(278 + strandShift, 76, 344 - strandShift * 0.4, 102);
   ctx.stroke();
 
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
   ctx.lineWidth = 2.6;
   ctx.beginPath();
-  ctx.moveTo(186, 122);
-  ctx.quadraticCurveTo(278, 62, 374, 122);
+  ctx.moveTo(186 + strandShift * 0.3, 122);
+  ctx.quadraticCurveTo(278 + strandShift * 0.6, 62, 374 - strandShift * 0.3, 122);
   ctx.stroke();
   ctx.restore();
 

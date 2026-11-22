@@ -127,6 +127,8 @@
   .lobby-trait-chip:focus-visible,
   .tier-info-btn:focus-visible,
   .tier-seg-btn:focus-visible,
+  .ss-line-btn:focus-visible,
+  .call-mode-chip:focus-visible,
   summary:focus-visible {
     outline: 3px solid var(--brand);
     outline-offset: 2px;
@@ -422,7 +424,7 @@
   }
 
   body.is-onboarding .app-main {
-    margin-inline-start: 0;
+    margin-inline: auto;
     padding-block-end: 2rem;
   }
 
@@ -1137,6 +1139,12 @@
   int-card {
     display: block;
     min-inline-size: 0;
+    scroll-margin-block-start: 1rem;
+  }
+
+  .check-tile.is-warn {
+    border-color: var(--int-gold);
+    background: rgba(245, 158, 11, 0.08);
   }
 
   int-button {
@@ -1427,18 +1435,6 @@
 
   .stage-office-bg.is-flipped {
     transform: scale(1.08) scaleX(-1);
-  }
-
-  .stage-desk-edge {
-    position: absolute;
-    inset-inline: 0;
-    inset-block-end: 0;
-    block-size: 11.5%;
-    z-index: 3;
-    background: linear-gradient(180deg, var(--desk-top, #d7b892) 0%, var(--desk-front, #b89468) 100%);
-    border-block-start: 1.5px solid rgba(255, 255, 255, 0.34);
-    box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.26);
-    pointer-events: none;
   }
 
   .avatar-meta {
@@ -3165,23 +3161,33 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .call-arena-layout.scratchpad-open {
+  .call-arena-layout.scratchpad-open,
+  .call-arena-layout.screenshare-open {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(220px, 40dvh) minmax(0, 1fr);
+    grid-template-rows: auto minmax(260px, 1fr);
+    overflow-y: auto;
+  }
+
+  .call-arena-layout.scratchpad-open .call-video-canvas,
+  .call-arena-layout.screenshare-open .call-video-canvas {
+    min-block-size: 210px;
   }
 
   .call-arena-layout.chat-open .call-chat-drawer,
-  .call-arena-layout.scratchpad-open.chat-open .call-chat-drawer {
+  .call-arena-layout.scratchpad-open.chat-open .call-chat-drawer,
+  .call-arena-layout.screenshare-open.chat-open .call-chat-drawer {
     position: fixed;
     inset-block: 0.55rem;
     inset-inline-end: 0.55rem;
+    block-size: auto;
     inline-size: min(360px, calc(100% - 1.1rem));
     z-index: 65;
     box-shadow: -16px 0 40px rgba(0, 0, 0, 0.55);
   }
 
   @media (min-width: 820px) {
-    .call-arena-layout.scratchpad-open {
+    .call-arena-layout.scratchpad-open,
+    .call-arena-layout.screenshare-open {
       grid-template-rows: auto;
       grid-template-columns: minmax(0, 1fr) min(440px, 46dvw);
     }
@@ -3192,16 +3198,19 @@
       grid-template-columns: minmax(0, 1fr) min(380px, 34dvw);
     }
 
-    .call-arena-layout.scratchpad-open {
+    .call-arena-layout.scratchpad-open,
+    .call-arena-layout.screenshare-open {
       grid-template-columns: minmax(0, 1fr) min(520px, 44dvw);
     }
 
-    .call-arena-layout.scratchpad-open.chat-open {
+    .call-arena-layout.scratchpad-open.chat-open,
+    .call-arena-layout.screenshare-open.chat-open {
       grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.95fr) min(340px, 28dvw);
     }
 
     .call-arena-layout.chat-open .call-chat-drawer,
-    .call-arena-layout.scratchpad-open.chat-open .call-chat-drawer {
+    .call-arena-layout.scratchpad-open.chat-open .call-chat-drawer,
+    .call-arena-layout.screenshare-open.chat-open .call-chat-drawer {
       position: static;
       inset: auto;
       inline-size: auto;
@@ -3566,18 +3575,22 @@
 
   .call-caption-hint {
     position: absolute;
-    inset-block-end: 0.6rem;
-    inset-inline-start: 0.6rem;
+    inset-block-end: 2.75rem;
+    inset-inline-start: 0.75rem;
     max-inline-size: calc(100% - 115px);
-    background: rgba(11, 17, 32, 0.76);
-    color: #e2e8f0;
-    padding: 0.24rem 0.6rem;
+    background: rgba(11, 17, 32, 0.72);
+    color: #cbd5e1;
+    padding: 0.2rem 0.55rem;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     z-index: 5;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .call-stage.is-split-view .call-caption-hint {
+    display: none;
   }
 
   .self-cam-pip {
@@ -3614,7 +3627,7 @@
   .thinking-bubble {
     position: absolute;
     inset-block-start: 18%;
-    inset-inline-start: calc(50% + 76px);
+    inset-inline-start: min(calc(50% + 76px), calc(100% - 70px));
     z-index: 5;
     background: rgba(255, 255, 255, 0.95);
     border: 2px solid #cbd5e1;
@@ -3784,23 +3797,10 @@
 
   .avatar-head-group {
     transform-origin: 110px 146px;
-    transition: transform 0.35s ease-out;
-    transition-timing-function: var(--spring-easing);
-    animation: idleFloat 4.2s ease-in-out infinite;
   }
-
-  .call-stage.is-speaking .avatar-head-group { animation: speakTiltRight 0.92s ease-in-out infinite; }
-  .call-stage.is-listening .avatar-head-group { transform: rotate(-3deg) translateY(-2px); }
-  .call-stage.is-thinking .avatar-head-group { animation: thinkFloat 1.5s ease-in-out infinite; }
 
   .avatar-eyes-blink {
     transform-origin: 110px 96px;
-    animation: eyeBlink 4.6s ease-in-out infinite;
-  }
-
-  .call-stage.is-thinking .avatar-face-eyes {
-    transform: translate(4px, -4px);
-    transition: transform 0.25s ease-out;
   }
 
   /* Chat Drawer & Logic Scratchpad */
@@ -4115,6 +4115,8 @@
     .avatar-head-group,
     .avatar-eyes-blink,
     .voice-rings span,
+    .connecting-ring,
+    .voice-eq-bars span,
     .live-dot,
     .btn-mic.is-listening {
       animation: none !important;
@@ -4129,6 +4131,349 @@
     .call-stage.is-speaking .avatar-head-group {
       transform: rotate(5deg);
     }
+  }
+
+  /* Meet/Zoom Experience Upgrades (`EXP-01`–`EXP-08`) */
+  .live-meeting-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    color: #f8fafc;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .live-dot-sm {
+    inline-size: 7px;
+    block-size: 7px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+  }
+
+  #call-elapsed-timer.is-wrapping {
+    color: #fde68a;
+  }
+
+  .call-mode-chip {
+    cursor: pointer;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(30, 41, 59, 0.85);
+    color: #e2e8f0;
+  }
+
+  .call-mode-chip.is-handsfree {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: rgba(52, 211, 153, 0.55);
+    color: #a7f3d0;
+  }
+
+  .call-hd-pill {
+    background: rgba(15, 23, 42, 0.85);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+  }
+
+  .interviewer-nameplate {
+    position: absolute;
+    inset-block-end: 0.7rem;
+    inset-inline-start: 0.75rem;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: rgba(9, 13, 22, 0.78);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    padding: 0.32rem 0.68rem;
+    border-radius: 10px;
+    color: #f8fafc;
+    font-size: 0.8rem;
+    pointer-events: none;
+  }
+
+  .voice-eq-bars {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    block-size: 14px;
+  }
+
+  .voice-eq-bars span {
+    display: block;
+    inline-size: 3px;
+    block-size: 4px;
+    border-radius: 999px;
+    background: #38bdf8;
+    transition: block-size 0.08s ease-out, background-color 0.2s ease;
+  }
+
+  .voice-eq-bars.is-active span:nth-child(1) { block-size: calc(4px + var(--eq-level, 0.4) * 8px); }
+  .voice-eq-bars.is-active span:nth-child(2) { block-size: calc(4px + var(--eq-level, 0.4) * 12px); background: #34d399; }
+  .voice-eq-bars.is-active span:nth-child(3) { block-size: calc(4px + var(--eq-level, 0.4) * 7px); }
+
+  .self-mic-dot {
+    display: inline-block;
+    inline-size: 7px;
+    block-size: 7px;
+    border-radius: 50%;
+    background: #64748b;
+    margin-inline-end: 0.3rem;
+  }
+
+  .self-mic-dot.is-live {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.9);
+  }
+
+  .call-cc-bar {
+    position: absolute;
+    inset-block-end: 3.15rem;
+    inset-inline-start: 0.75rem;
+    inline-size: min(560px, calc(100% - 120px));
+    z-index: 7;
+    background: rgba(9, 13, 22, 0.86);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 12px;
+    padding: 0.42rem 0.72rem;
+    color: #f8fafc;
+    font-size: 0.82rem;
+    line-height: 1.36;
+    text-align: start;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transition: opacity 0.35s ease;
+    pointer-events: none;
+  }
+
+  @media (min-width: 560px) {
+    .call-cc-bar {
+      inline-size: min(560px, calc(100% - 235px));
+    }
+  }
+
+  .call-cc-bar:not([hidden]) ~ .call-caption-hint {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .call-cc-bar.is-fading {
+    opacity: 0;
+  }
+
+  .call-connecting-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: rgba(9, 13, 22, 0.86);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    color: #f8fafc;
+    transition: opacity 0.25s ease;
+  }
+
+  .call-connecting-overlay.is-fading {
+    opacity: 0;
+  }
+
+  .connecting-ring {
+    inline-size: 46px;
+    block-size: 46px;
+    border-radius: 50%;
+    border: 3px solid rgba(56, 189, 248, 0.25);
+    border-top-color: #38bdf8;
+    animation: procPulse 1.1s ease-in-out infinite;
+  }
+
+  @media (min-width: 768px) {
+    .call-stage.is-split-view .call-video-canvas {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.75rem;
+      padding: 0.75rem;
+      align-items: stretch;
+    }
+
+    .call-stage.is-split-view .call-avatar-mount {
+      grid-column: 1;
+      grid-row: 1;
+      place-self: center;
+      inline-size: min(86%, 440px);
+      block-size: min(86%, 440px);
+    }
+
+    .call-stage.is-split-view .self-cam-pip {
+      position: relative;
+      inset: auto;
+      grid-column: 2;
+      grid-row: 1;
+      inline-size: 100%;
+      block-size: 100%;
+      aspect-ratio: auto;
+      border-radius: 16px;
+    }
+
+    .call-stage.is-split-view .call-cc-bar {
+      inset-block-end: 1rem;
+    }
+  }
+
+  .btn-dark-pill.is-active {
+    background: #1d4ed8;
+    border-color: #60a5fa;
+    color: #ffffff;
+  }
+
+  .call-more-popover {
+    background: #0f172a;
+    color: #f8fafc;
+    border: 1.5px solid #334155;
+    border-radius: 16px;
+    padding: 0.9rem;
+    inline-size: min(330px, calc(100vw - 1.5rem));
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+    margin: auto;
+  }
+
+  .call-more-popover::backdrop {
+    background: rgba(2, 6, 23, 0.45);
+  }
+
+  .more-pop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-block-end: 0.35rem;
+  }
+
+  .more-pop-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-block-start: 0.55rem;
+    font-size: 0.8rem;
+  }
+
+  .more-pop-check {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-block-start: 0.5rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  .more-pop-actions {
+    margin-block-start: 0.75rem;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .vad-countdown-bar {
+    inline-size: 92px;
+    block-size: 6px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.28);
+    overflow: hidden;
+    position: relative;
+    margin-inline-start: auto;
+  }
+
+  .vad-countdown-bar::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: var(--vad-pct, 0%);
+    background: #22c55e;
+  }
+
+  .call-screenshare-panel {
+    background: #0b1120;
+    color: #e2e8f0;
+    border: 1.5px solid #334155;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  .screenshare-code-lines {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 0.4rem 0.6rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .ss-line-btn {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    color: inherit;
+    text-align: start;
+    display: flex;
+    gap: 0.65rem;
+    padding: 0.22rem 0.45rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  .ss-line-btn:hover {
+    background: rgba(56, 189, 248, 0.12);
+  }
+
+  .ss-line-btn.is-highlighted {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.55);
+  }
+
+  .ss-line-num {
+    min-inline-size: 1.6rem;
+    color: #64748b;
+    user-select: none;
+  }
+
+  .ss-line-code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .screenshare-notes-box {
+    padding: 0.55rem 0.7rem;
+    border-top: 1px solid #1e293b;
+  }
+
+  .scorecard-metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+    gap: 0.55rem;
+    margin-block: 0.6rem;
+  }
+
+  .deferred-coach-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    max-block-size: 240px;
+    overflow: auto;
   }
 }
 

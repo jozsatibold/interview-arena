@@ -7,8 +7,8 @@ export function buildVisemeTimeline(text) {
   const frames = [];
   let cursor = 0;
 
-  const pushFrame = (weight, open, width, round, close = false, charIdx = cursor) => {
-    frames.push({ start: 0, end: 0, weight, open, width, round, close, charIdx });
+  const pushFrame = (weight, open, width, round, close = false) => {
+    frames.push({ start: 0, end: 0, weight, open, width, round, close });
   };
 
   while (cursor < s.length) {
@@ -102,7 +102,8 @@ export function buildVisemeTimeline(text) {
 
 export function sampleVisemeTimeline(frames, u) {
   if (!frames.length) return { open: 0.45, width: 0.1, round: 0.1, close: false };
-  const clamped = Math.max(0, Math.min(0.9999, u));
+  const safeU = Number.isFinite(u) ? u : 0;
+  const clamped = Math.max(0, Math.min(0.9999, safeU));
   let idx = frames.length - 1;
   for (let i = 0; i < frames.length; i++) {
     if (clamped <= frames[i].end) {
