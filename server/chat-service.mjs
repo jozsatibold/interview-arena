@@ -700,7 +700,12 @@ export async function handleChatStream(body, reqOrRes, maybeRes = null) {
       if (safeEnd > streamedSpokenLen) {
         const nextDelta = spokenPart.slice(streamedSpokenLen, safeEnd);
         streamedSpokenLen = safeEnd;
-        safeWrite({ type: 'token', delta: nextDelta, spokenSoFar: spokenPart.slice(0, safeEnd).trimStart() });
+        const cleanSoFar = spokenPart
+          .slice(0, safeEnd)
+          .replace(/\*\*/g, '')
+          .replace(/\s+\*\s+/g, ' ')
+          .trimStart();
+        safeWrite({ type: 'token', delta: nextDelta, spokenSoFar: cleanSoFar });
       }
     });
   } catch (err) {

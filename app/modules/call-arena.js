@@ -1,6 +1,7 @@
 import { esc, consumeNdjsonStream, saveUserState } from '../components.js';
 import { pickRandomCompanyName } from '../../shared/company.mjs';
 import { computeCallSpeechMetrics } from '../../shared/speech-metrics.mjs';
+import { computeUnspokenTail } from '../../shared/transcript.mjs';
 import { $, state, getCandidateIdentity, syncCandidateIdentity } from './state.js';
 import { getActiveAgentMeta, rollAppearance, rollOfficeBackdrop, inferVoiceGender, renderAvatarVisual, updateAvatarStage, setAvatarState } from './avatar.js';
 import { rollDetailedDna } from './avatar-detailed.js';
@@ -485,6 +486,7 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
   let streamBubble = null;
   let streamBodyEl = null;
   let spokenQueuedUpTo = 0;
+  let spokenQueuedText = '';
   let streamedAccum = '';
   let receivedFirstToken = false;
   const thinkingCueTimer = setTimeout(() => {
@@ -517,14 +519,17 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
     const flushReadySentences = (spokenSoFar, isFinal = false) => {
       if (turnSeq !== activeSessionSeq) return;
       if (!$('#auto-speak-toggle').checked) return;
-      const unseen = spokenSoFar.slice(spokenQueuedUpTo);
-      if (!unseen.trim()) return;
       if (isFinal) {
+        const tail = computeUnspokenTail(spokenSoFar, spokenQueuedText);
+        if (!tail) return;
+        spokenQueuedText = spokenQueuedText ? `${spokenQueuedText} ${tail}` : tail;
         spokenQueuedUpTo = spokenSoFar.length;
-        enqueueSpeakSentence(unseen, { reset: !firstSpeechStarted });
+        enqueueSpeakSentence(tail, { reset: !firstSpeechStarted });
         firstSpeechStarted = true;
         return;
       }
+      const unseen = spokenSoFar.slice(spokenQueuedUpTo);
+      if (!unseen.trim()) return;
       const sentenceRe = /([\s\S]+?(?<!\b(?:Ms|Mr|Mrs|Dr|vs|e\.g|i\.e))(?<!\d)[.!?])\s+/g;
       let match;
       let consumed = 0;
@@ -535,6 +540,7 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
         if (combined.length >= 6) {
           consumed = match.index + match[0].length;
           buffered = '';
+          spokenQueuedText = spokenQueuedText ? `${spokenQueuedText} ${combined}` : combined;
           enqueueSpeakSentence(combined, { reset: !firstSpeechStarted });
           firstSpeechStarted = true;
         } else {
@@ -604,9 +610,6 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
           streamBodyEl.textContent = reply.spokenEnglish;
         }
         state.activeSession.messages.push({ role: 'assistant', content: reply.spokenEnglish });
-        if (streamedAccum && reply.spokenEnglish.slice(0, spokenQueuedUpTo) !== streamedAccum.slice(0, spokenQueuedUpTo)) {
-          spokenQueuedUpTo = 0;
-        }
         flushReadySentences(reply.spokenEnglish, true);
         if (!$('#auto-speak-toggle').checked) setAvatarState('idle');
       } else {

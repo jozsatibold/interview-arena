@@ -31,3 +31,44 @@ export function normalizeInterviewTranscript(rawText, { mode = 'interview' } = {
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
+
+function normalizeSpokenForDiff(text) {
+  return String(text || '')
+    .replace(/\*\*/g, '')
+    .replace(/\s+\*\s+/g, ' ')
+    .replace(/\s+---+\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Computes ONLY the unspoken remainder of `finalText` that has not yet been queued to TTS
+ * during streaming. Prevents double-speaking when trailing whitespace/newlines or markdown
+ * formatting (`**`, `---`) differ between streamed tokens and final `reply.spokenEnglish`.
+ */
+export function computeUnspokenTail(finalText, alreadyQueuedText) {
+  const finalNorm = normalizeSpokenForDiff(finalText);
+  if (!finalNorm) return '';
+  const queuedNorm = normalizeSpokenForDiff(alreadyQueuedText);
+  if (!queuedNorm) return finalNorm;
+  if (finalNorm === queuedNorm || queuedNorm.startsWith(finalNorm)) return '';
+  if (finalNorm.startsWith(queuedNorm)) {
+    return finalNorm.slice(queuedNorm.length).trim();
+  }
+  const lowerFinal = finalNorm.toLowerCase();
+  const lowerQueued = queuedNorm.toLowerCase();
+  if (lowerFinal === lowerQueued || lowerQueued.startsWith(lowerFinal)) return '';
+  if (lowerFinal.startsWith(lowerQueued)) {
+    return finalNorm.slice(queuedNorm.length).trim();
+  }
+  // Anchor on the last 4 words of already-queued speech to find where unspoken text begins
+  const qWords = lowerQueued.split(' ').filter(Boolean);
+  for (let n = Math.min(5, qWords.length); n >= 2; n--) {
+    const anchor = qWords.slice(-n).join(' ');
+    const idx = lowerFinal.lastIndexOf(anchor);
+    if (idx !== -1) {
+      return finalNorm.slice(idx + anchor.length).trim();
+    }
+  }
+  return '';
+}

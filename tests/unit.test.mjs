@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeInterviewTranscript } from '../shared/transcript.mjs';
+import { normalizeInterviewTranscript, computeUnspokenTail } from '../shared/transcript.mjs';
 import { buildVisemeTimeline, sampleVisemeTimeline } from '../shared/viseme.mjs';
 import { pickRandomCompanyName, companyAppearsInText } from '../shared/company.mjs';
 import {
@@ -553,4 +553,32 @@ test('every tech-company archetype has a complete senior knowledge base, zero pr
   assert.equal(getArtifactsForTopic('Technical', 'people')[0]?.id, 'people-hiring-leveling');
 
   assert.ok(getRoleKnowledgeBase('unknown-fallback') === ROLE_KNOWLEDGE_BASES.general);
+});
+
+test('computeUnspokenTail prevents double-speaking when streamed text and final reply differ in trailing whitespace or markdown', () => {
+  // Exact regression case: streamed sentences ended with trailing newline before ===COACH_JSON===, trimmed on done
+  assert.equal(
+    computeUnspokenTail('Hi Alex! Welcome to our chat. How is your week going?', 'Hi Alex! Welcome to our chat. How is your week going?\n'),
+    ''
+  );
+  // Only final unfinished sentence remains
+  assert.equal(
+    computeUnspokenTail('Hi Alex! Welcome to our chat. How is your week going?', 'Hi Alex! Welcome to our chat.'),
+    'How is your week going?'
+  );
+  // Markdown ** stripped between stream and final reply
+  assert.equal(
+    computeUnspokenTail('Hi Alex, glad to meet you! How is your week going?', 'Hi **Alex**, glad to meet you!'),
+    'How is your week going?'
+  );
+  // Nothing queued during stream yet -> speak entire final text once
+  assert.equal(
+    computeUnspokenTail('How has your week been going?', ''),
+    'How has your week been going?'
+  );
+  // Anchor recovery if minor mid-sentence edit happened before done
+  assert.equal(
+    computeUnspokenTail('That makes complete sense. What was your biggest trade-off there?', 'That makes total sense. What was'),
+    'your biggest trade-off there?'
+  );
 });
