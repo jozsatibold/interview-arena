@@ -41,8 +41,8 @@ export function renderTargetModelSelectors() {
     : installedNonEmbed.length
       ? installedNonEmbed
       : [{ name: 'qwen3-vl:8b', sizeGB: '~6.1 GB (Pull Recommended)' }];
-  const plannerPref = $('#planner-model-select')?.value || state.user?.plannerModel || models[0]?.name || '';
-  const visionPref = $('#vision-model-select')?.value || state.user?.visionModel || vModels[0]?.name || '';
+  const plannerPref = $('#onb-planner-model')?.value || $('#planner-model-select')?.value || state.user?.plannerModel || models[0]?.name || '';
+  const visionPref = $('#vision-model-select')?.value || $('#settings-vision-model')?.value || state.user?.visionModel || vModels[0]?.name || '';
 
   for (const sel of [$('#planner-model-select'), $('#settings-planner-model'), $('#cv-planner-model'), $('#onb-planner-model')]) {
     fillSelectOptions(sel, models, { selectedValue: plannerPref, getValue: (m) => m.name, getLabel: (m) => `${m.name} (${m.sizeGB}${String(m.sizeGB).includes('GB') ? '' : ' GB'})` });
@@ -217,6 +217,15 @@ export function syncContextTierPickers(modelOverride = '') {
   }
 }
 
+function syncOnboardingModelButton(modelName) {
+  const pullBtn = $('#btn-onb-pull-model');
+  if (!pullBtn) return;
+  const installed = new Set((state.setup?.installedModels || []).map((m) => m.name));
+  const isInstalled = installed.has(String(modelName || '').trim());
+  pullBtn.disabled = isInstalled;
+  pullBtn.textContent = isInstalled ? '✅ Installed' : '⬇ Pull Model';
+}
+
 function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
   const onbChecklist = $('#onb-setup-checklist');
   if (onbChecklist) {
@@ -232,9 +241,11 @@ function renderOnboardingSetupState(s, ollamaTiles, chatModelOptions, isReady) {
   if ($('#btn-onb-start-ollama')) {
     $('#btn-onb-start-ollama').hidden = Boolean(s.ollamaRunning || !s.ollamaInstalled);
   }
+  const activeSelModel = state.user?.selectedModel || s.recommendedModels?.[0]?.id || '';
   fillSelectOptions($('#onb-setup-model-select'), chatModelOptions, {
-    selectedValue: state.user?.selectedModel || s.recommendedModels?.[0]?.id || ''
+    selectedValue: activeSelModel
   });
+  syncOnboardingModelButton(activeSelModel);
 
   if ($('#onb-zonos-badge')) {
     $('#onb-zonos-badge').textContent = s.zonosRunning ? 'Running ✅' : s.zonosBuilt ? 'Installed · Stopped' : 'Optional';
@@ -583,7 +594,20 @@ export function wireDashboardAndSettingsEvents({ switchToView, applyCvCatalogBun
   }
 
   $('#model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
-  $('#onb-setup-model-select')?.addEventListener('change', (e) => syncContextTierPickers(e.target.value));
+  $('#onb-setup-model-select')?.addEventListener('change', async (e) => {
+    const val = e.target.value;
+    syncContextTierPickers(val);
+    syncOnboardingModelButton(val);
+    const isInstalled = (state.setup?.installedModels || []).some((m) => m.name === val);
+    if (isInstalled) {
+      if (state.user) state.user.selectedModel = val;
+      if ($('#model-select')) $('#model-select').value = val;
+      if ($('#setup-label')) $('#setup-label').textContent = val;
+      try {
+        state.user = await saveUserState({ selectedModel: val });
+      } catch {}
+    }
+  });
   $('#custom-model-input')?.addEventListener('input', (e) => syncContextTierPickers(e.target.value));
 
   $('#settings-form')?.addEventListener('submit', async (e) => {

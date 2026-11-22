@@ -16,7 +16,7 @@ export const WHISPER_TECH_PROMPT =
 
 export const APP_DIR = path.join(ROOT_DIR, 'app');
 export const SHARED_DIR = path.join(ROOT_DIR, 'shared');
-export const DATA_DIR = path.join(ROOT_DIR, 'data');
+export const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
 export const DB_FILE = path.join(DATA_DIR, 'arena.db');
 export const STATE_FILE = path.join(DATA_DIR, 'user-state.json');
 export const CUSTOM_INTERVIEWS_FILE = path.join(DATA_DIR, 'custom-interviews.json');

@@ -30,7 +30,8 @@ import {
   getActiveCv,
   insertAndActivateCvSync,
   updateCvGeneratedJdsSync,
-  upsertCustomInterviewSync
+  upsertCustomInterviewSync,
+  mutateStateSync
 } from './db.mjs';
 import {
   fetchOllamaChat,
@@ -299,7 +300,7 @@ export async function analyzeCvAndBuildDailyPath(
       keep_alive: '5m',
       stream: true,
       format: 'json',
-      options: { temperature: 0.35, num_predict: 5600 },
+      options: { temperature: 0.35, num_ctx: 12288, num_predict: 5600 },
       messages: [{ role: 'user', content: prompt }]
     },
     240000,
@@ -390,7 +391,14 @@ export async function analyzeCvAndBuildDailyPath(
     agentOverrides: normalizeAgentOverrides(parsed.agentOverrides, archKey, profile, rawText)
   });
 
-  const bundle = await buildCvResponseBundle();
+  // Reset manual role-track override to 'auto' for the newly uploaded CV and persist chosen plannerModel.
+  mutateStateSync((s) => {
+    s.targetRoleTrack = 'auto';
+    if (plannerModel) s.plannerModel = chosenModel;
+    return {};
+  });
+
+  const bundle = await buildCvResponseBundle(null, 'auto');
   return { version: bundle.activeCv, ...bundle };
 }
 

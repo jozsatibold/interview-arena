@@ -201,8 +201,13 @@ async function submitOnboardingCv(switchToView) {
     if ($('#onb-cv-selected-file')) $('#onb-cv-selected-file').hidden = true;
     if ($('#onb-cv-paste-input')) $('#onb-cv-paste-input').value = '';
     if ($('#onb-notes-input')) $('#onb-notes-input').value = '';
+    if (state.user) {
+      state.user.targetRoleTrack = 'auto';
+      if (plannerModel) state.user.plannerModel = plannerModel;
+    }
 
     await new Promise((r) => setTimeout(r, 750));
+    setOnboardingStep(1);
     onBundleApplied(finalPayload);
     switchToView('view-path');
   } catch (err) {
