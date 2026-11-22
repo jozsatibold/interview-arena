@@ -83,10 +83,19 @@ export function formatKnowledgeForInterviewer({ archKey = 'general', topic = 'Te
 
 /**
  * Format role-specific Top 5% evaluation bar for final Scorecard grading (/api/chat finish).
+ * When compact=true (Small 1B-8B tier), trims cleanly to avoid 4096 num_ctx overflow;
+ * Medium/Large tiers keep full untruncated depth.
  */
-export function formatKnowledgeForDebrief({ archKey = 'general', topic = 'Technical' } = {}) {
+export function formatKnowledgeForDebrief({ archKey = 'general', topic = 'Technical', compact = false } = {}) {
   const kb = getRoleKnowledgeBase(archKey);
   const roundFocus = kb.roundRubrics?.[topic] || kb.roundRubrics?.Technical || kb.mandate;
+  if (compact) {
+    const flags = (kb.redFlags || []).slice(0, 2).map((f) => clipText(f, 110)).join(' | ');
+    return `=== SENIOR RUBRIC (${String(archKey).toUpperCase()} · ${topic}) ===
+Top 5% Bar: ${clipText(kb.mandate, 170)}
+Round Criteria: ${clipText(roundFocus, 180)}
+Red Flags (penalize if seen): ${flags}`;
+  }
   const models = (kb.mentalModels || []).slice(0, 3).join(' | ');
   const flags = (kb.redFlags || []).slice(0, 3).join(' | ');
   const phrases = (kb.powerPhrases || []).slice(0, 2).join(' | ');

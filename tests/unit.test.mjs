@@ -522,6 +522,11 @@ test('every tech-company archetype has a complete senior knowledge base, zero pr
   const debriefBar = formatKnowledgeForDebrief({ archKey: 'cro', topic: 'Live Coding' });
   assert.match(debriefBar, /SENIOR ROLE GRADING RUBRIC \(CRO/i);
   assert.match(debriefBar, /Automatic Penalty Red Flags/i);
+  const compactDebrief = formatKnowledgeForDebrief({ archKey: 'mobile', topic: 'Technical', compact: true });
+  assert.ok(compactDebrief.length <= 750, `Compact debrief too long for small LLM: ${compactDebrief.length}`);
+  assert.match(compactDebrief, /Top 5% Bar:/i);
+  assert.match(compactDebrief, /Red Flags/i);
+  assert.ok(formatKnowledgeForDebrief({ archKey: 'mobile', topic: 'Technical', compact: false }).length > 1000);
 
   // Exact first Screen Share artifact pinning across every specialized track
   assert.equal(getArtifactsForTopic('Technical', 'ceo')[0]?.id, 'ceo-board-runway');

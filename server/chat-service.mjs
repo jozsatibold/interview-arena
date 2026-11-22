@@ -526,15 +526,19 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
       err.statusCode = 400;
       throw err;
     }
+    const tierId = tierInfo.id || (tierInfo.budgets.compactPrompt ? 'small' : 'medium');
+    const isSmallTier = tierId === 'small';
     const adaptedAgents = getAdaptedAgents(AGENT_META, activeCv, resolvedRoleTrack);
     const meta = adaptedAgents.find((a) => a.id === validMeta.id) || validMeta;
     const personality = pickPersonality(topic, personalityTraits || personalityId);
-    const personalityBlock = `INTERVIEWER PERSONALITY (${personality.emoji} ${personality.label} — ${personality.mood}):\nEmbody this realistic human personality naturally without exaggerating or becoming extreme.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
+    const personalityBlock = isSmallTier
+      ? `INTERVIEWER STYLE (${personality.label} — ${personality.mood}): ${summarizeMdPrompt(personality.prompt, 280)}`
+      : `INTERVIEWER PERSONALITY (${personality.emoji} ${personality.label} — ${personality.mood}):\nEmbody this realistic human personality naturally without exaggerating or becoming extreme.\nBEHAVIORAL DIRECTIVE: ${personality.prompt}`;
     const rawAgentMd = useStaticAgentFile
       ? stripStaticOpenerSection(await fs.readFile(path.join(ROOT_DIR, 'agents', validMeta.id), 'utf8'))
       : '';
-    const agentLimit = isFinish ? 2200 : tierInfo.budgets.maxAgentChars;
-    const jdLimit = isFinish ? 1400 : tierInfo.budgets.maxJdChars;
+    const agentLimit = isFinish ? (isSmallTier ? 900 : 2200) : tierInfo.budgets.maxAgentChars;
+    const jdLimit = isFinish ? (isSmallTier ? 550 : 1400) : tierInfo.budgets.maxJdChars;
     const cvGuardText = `${activeCv?.rawText || ''}\n${activeCv?.profile?.profilePrompt || ''}`;
     const cleanReqCompany = String(interviewerCompany || '').trim().slice(0, 64);
     resolvedCompany = customInterviewId
@@ -543,7 +547,6 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         ? cleanReqCompany
         : pickRandomCompanyName(cvGuardText);
     const { jdPrompt, openerHint } = await resolveTargetContext({ jdFile, customInterviewId, customRoundId, day, companyName: resolvedCompany, targetRoleTrack: resolvedRoleTrack }, jdLimit);
-    const tierId = tierInfo.id || (tierInfo.budgets.compactPrompt ? 'small' : 'medium');
     const stackAddendum = useStaticAgentFile
       ? formatTechStacksForInterviewer({ archKey: effectiveArchKey, cvText: activeCv?.rawText || '', coreStack: activeCv?.profile?.coreStack || [], jdText: jdPrompt, topic, tier: tierId })
       : '';
@@ -596,13 +599,14 @@ async function resolveChatContext(body, { isFinish = false } = {}) {
         retryOf
       }));
     } else {
-      const coreRules = !useStaticAgentFile
-        ? `${activeCv?.profile?.profilePrompt || ''}\n\nFULL CV:\n${summarizeMdPrompt(activeCv?.rawText || '', 3000)}`
+      const rawCore = !useStaticAgentFile
+        ? `${activeCv?.profile?.profilePrompt || ''}\n\nFULL CV:\n${summarizeMdPrompt(activeCv?.rawText || '', isSmallTier ? 700 : 3000)}`
         : await fs.readFile(path.join(ROOT_DIR, '00-candidate-profile-and-core-rules.md'), 'utf8');
+      const coreRules = isSmallTier ? summarizeMdPrompt(rawCore, 950) : rawCore;
       return {
         model, mode, isGuestSession, firstName, normalizedMsgs, tierInfo, earlierSummary,
         topic: effectiveTopic, agentFile: effectiveAgentFile, jdFile: effectiveJdFile, day, doubleXpActive, retryOf, chosenTutorAngle, tutorTopicLabel,
-        interviewFinishMeta: { coreRules, personalityBlock, agentPrompt, jdPrompt, activeCv, meta, isContinuous, effectiveArchKey, effectiveTopic },
+        interviewFinishMeta: { coreRules, personalityBlock, agentPrompt, jdPrompt, activeCv, meta, isContinuous, effectiveArchKey, effectiveTopic, isSmallTier },
         systemPrompt: '',
         startPrompt
       };
@@ -784,8 +788,10 @@ Give 2 concrete strengths in "strengthsHu", 2 improvements in "weaknessesHu", an
     finishPrompt = 'The English lesson is wrapping up! Return a warm teacher goodbye in "spokenEnglish" and return ONLY valid JSON matching the exact schema with an encouraging "scorecard" object.';
   } else {
     const m = ctx.interviewFinishMeta;
-    const kbDebrief = formatKnowledgeForDebrief({ archKey: m.effectiveArchKey || 'general', topic: m.effectiveTopic || 'Technical' });
-    systemPrompt = `${m.coreRules}\n\n${m.personalityBlock}${summaryNote}\n\n${kbDebrief}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`;
+    const kbDebrief = formatKnowledgeForDebrief({ archKey: m.effectiveArchKey || 'general', topic: m.effectiveTopic || 'Technical', compact: Boolean(m.isSmallTier) });
+    systemPrompt = m.isSmallTier
+      ? `Interviewer: ${m.meta?.avatarName || 'Interviewer'} (${m.effectiveTopic}). Evaluate candidate objectively.\n${m.coreRules}${summaryNote}\n\n${kbDebrief}\n\n=== TARGET JD ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`
+      : `${m.coreRules}\n\n${m.personalityBlock}${summaryNote}\n\n${kbDebrief}\n\n=== ACTIVE INTERVIEWER AGENT ===\n${m.agentPrompt}\n\n=== TARGET JOB DESCRIPTION ===\n${m.jdPrompt}\n\n${buildFinishContract('"NO HIRE" | "LEAN HIRE" | "STRONG HIRE (TOP 5%)"')}`;
   }
 
   const budgets = ctx.tierInfo?.budgets || { numCtx: 8192, numPredict: 700 };
