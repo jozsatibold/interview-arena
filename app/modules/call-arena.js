@@ -281,6 +281,7 @@ export async function startSession(cfg) {
     guestMode: Boolean(cfg.guestMode && isPractice),
     ...cfg,
     interviewerCompany,
+    scriptSessionId: null,
     examMode,
     targetDurationMinutes: durationMinutes,
     liveExpression: 'warm',
@@ -375,6 +376,7 @@ function buildChatRequestPayload({ model, action, continuousFlow, currentPad, pa
     agentFile: s.agentFile,
     jdFile: s.jdFile,
     interviewerCompany: s.interviewerCompany || '',
+    scriptSessionId: s.scriptSessionId || null,
     customInterviewId: s.customInterviewId || null,
     customRoundId: s.customRoundId || null,
     personalityId: s.personality?.id || null,
@@ -592,6 +594,9 @@ export async function sendChatTurn(action, userText = null, userEntryRef = null,
       } else if (finalDone.interviewerCompany && state.activeSession?.mode === 'interview' && !state.activeSession?.customInterviewId) {
         state.activeSession.interviewerCompany = finalDone.interviewerCompany;
         $('#arena-subtitle').textContent = `${state.activeSession.title || state.activeSession.topic} · ${finalDone.interviewerCompany} • Model: ${model}`;
+      }
+      if (finalDone.scriptSessionId && state.activeSession) {
+        state.activeSession.scriptSessionId = finalDone.scriptSessionId;
       }
       if (activeRetry?.card?.isConnected) {
         activeRetry.card.classList.add('is-practiced');

@@ -58,6 +58,22 @@ import {
 } from '../shared/model-tiers.mjs';
 import { rollDetailedDna, getExpressionTargets } from '../app/modules/avatar-detailed.js';
 import { AGENT_META, MORNING_PATH } from '../server/config.mjs';
+import { SCRIPT_STAGES, SCRIPT_BEATS, SCRIPT_BEAT_MAP } from '../shared/script-beats.mjs';
+import {
+  resolveScriptComplexity,
+  selectStageSpine,
+  generateInterviewScript,
+  advanceScriptState,
+  renderScriptPacingDirectives
+} from '../shared/interview-script-engine.mjs';
+import {
+  MAX_SCRIPT_SESSIONS,
+  resolveOrCreateScriptSession,
+  updateScriptSessionPlan,
+  recordScriptBeatSignal,
+  clearScriptSession,
+  getScriptSessionCount
+} from '../server/script-session-store.mjs';
 
 test('shared transcript normalizer cleans ASR tech terms cleanly', () => {
   assert.equal(normalizeInterviewTranscript('We built micro front end with rx js and ng rx'), 'We built micro-frontend with RxJS and NgRx');
@@ -651,4 +667,221 @@ test('executive and manager interview architecture: custom loops, time-scaled pa
   assert.ok(ceoCaseArts.includes('exec-100day-plan'));
   const emCaseArts = getArtifactsForTopic('Live Coding', 'em').map((a) => a.id);
   assert.ok(emCaseArts.includes('em-pip-coaching'));
+});
+
+test('interview script engine: graph integrity, 1000+ coherent rolls, complexity tiers & state machine guards', () => {
+  // 1. Referential integrity of beat graph edges
+  for (const beat of SCRIPT_BEATS) {
+    assert.ok(SCRIPT_STAGES.includes(beat.stage), `Invalid stage on ${beat.id}`);
+    for (const ref of [...(beat.preferredNext || []), ...(beat.forbiddenNext || [])]) {
+      assert.ok(SCRIPT_BEAT_MAP[ref], `Dangling beat edge "${ref}" on ${beat.id}`);
+    }
+  }
+
+  // 2. LLM complexity tier mapping (user's local Ollama roster + small/medium/large)
+  const tierFor = (name) => resolveEffectiveContextTier({ preference: 'auto', modelName: name });
+  assert.equal(resolveScriptComplexity(tierFor('LFM2.5-2.6B')), 'lean');
+  assert.equal(resolveScriptComplexity(tierFor('qwen2.5:7b')), 'lean');
+  assert.equal(resolveScriptComplexity(tierFor('qwen3.5:9b')), 'standard');
+  assert.equal(resolveScriptComplexity(tierFor('gemma4:12b')), 'standard');
+  assert.equal(resolveScriptComplexity(tierFor('qwen3.6:27b')), 'rich');
+  assert.equal(resolveScriptComplexity(tierFor('qwen3.6:35b-a3b-q8_0')), 'rich');
+  assert.equal(resolveScriptComplexity(tierFor('llama3.3:70b')), 'rich');
+  assert.deepEqual(selectStageSpine({ topic: 'HR', archKey: 'frontend', targetDurationSeconds: 720, complexity: 'lean' }), ['arrival', 'framing', 'core_anchor', 'reverse_qa', 'closing']);
+  assert.ok(selectStageSpine({ topic: 'Technical', archKey: 'ceo', targetDurationSeconds: 1500, complexity: 'rich' }).includes('applied_case'));
+
+  // 3. Exhaustive Monte Carlo coherence test across roles x topics x complexities x durations
+  const stageIdxOf = (stage) => SCRIPT_STAGES.indexOf(stage);
+  const archSample = ['frontend', 'em', 'ceo'];
+  const topicSample = ['HR', 'Behavioral', 'Technical', 'Live Coding', 'System Design', 'Negotiation'];
+  const compSample = ['lean', 'standard', 'rich'];
+  const durSample = [600, 1500, 2700];
+  let totalRolls = 0;
+
+  for (const archKey of archSample) {
+    for (const topic of topicSample) {
+      for (const complexity of compSample) {
+        for (const targetDurationSeconds of durSample) {
+          for (let k = 0; k < 7; k++) {
+            totalRolls += 1;
+            const plan = generateInterviewScript({
+              topic,
+              archKey,
+              targetDurationSeconds,
+              complexity,
+              hasScreenShare: topic !== 'HR' && topic !== 'Negotiation'
+            });
+            assert.ok(plan.beatIds.length >= 5, `Spine too short for ${archKey}/${topic}/${complexity}`);
+            const firstBeat = SCRIPT_BEAT_MAP[plan.beatIds[0]];
+            const lastBeat = SCRIPT_BEAT_MAP[plan.beatIds[plan.beatIds.length - 1]];
+            assert.equal(firstBeat.stage, 'arrival');
+            assert.equal(lastBeat.stage, 'closing');
+
+            const seenTags = new Set();
+            let prevBeat = null;
+            for (const id of plan.beatIds) {
+              const b = SCRIPT_BEAT_MAP[id];
+              assert.ok(b, `Unknown beat id ${id}`);
+              if (prevBeat) {
+                assert.equal(prevBeat.forbiddenNext?.includes(id), false, `Forbidden jump ${prevBeat.id} -> ${id}`);
+                assert.ok(stageIdxOf(b.stage) > stageIdxOf(prevBeat.stage), `Non-monotonic stage ${prevBeat.stage} -> ${b.stage}`);
+              }
+              for (const ex of b.excludes || []) {
+                assert.equal(seenTags.has(ex), false, `Conflict excludes=${ex} on ${id} in ${plan.beatIds.join(',')}`);
+              }
+              for (const tag of b.provides || []) seenTags.add(tag);
+              prevBeat = b;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(totalRolls > 1000);
+
+  // 4. Meaningful random variety across rolls (arrival & framing shouldn't collapse to 1 variant)
+  const arrivalsSeen = new Set();
+  const framingsSeen = new Set();
+  for (let i = 0; i < 60; i++) {
+    const p = generateInterviewScript({
+      topic: 'Technical',
+      archKey: 'ceo',
+      targetDurationSeconds: 1500,
+      complexity: 'rich',
+      hasScreenShare: true
+    });
+    arrivalsSeen.add(p.beatIds[0]);
+    framingsSeen.add(p.beatIds[1]);
+  }
+  assert.ok(arrivalsSeen.size >= 3, `Expected >=3 arrival variants, got ${arrivalsSeen.size}`);
+  assert.ok(framingsSeen.size >= 3, `Expected >=3 framing variants, got ${framingsSeen.size}`);
+
+  // 5. State machine safeguards (barge-in, retry, short clarification, rich adaptive hold, lean deterministic, clock jump)
+  let richPlan = {
+    id: 'test-rich',
+    complexity: 'rich',
+    topic: 'Technical',
+    archKey: 'frontend',
+    beatIds: ['arrival_warm_smalltalk', 'framing_role_problem', 'arc_problem_resonance', 'anchor_domain_tradeoff', 'probe_scale_constraint', 'qa_classic_team', 'close_warm_takeaway'],
+    currentIndex: 3, // anchor_domain_tradeoff (minTurns 1, maxTurns 2)
+    turnsOnBeat: 0,
+    shortHoldUsedOnBeat: false,
+    completedIds: ['arrival_warm_smalltalk', 'framing_role_problem', 'arc_problem_resonance'],
+    lastBeatDone: null
+  };
+
+  // Barge-in & retry must hold current beat
+  const onBargeIn = advanceScriptState(richPlan, { action: 'turn', userTurns: 4, lastUserText: 'Wait let me clarify my point about sharding!', interrupted: true });
+  assert.equal(onBargeIn.currentIndex, 3);
+  const onRetry = advanceScriptState(richPlan, { action: 'turn', userTurns: 4, lastUserText: 'Better phrasing here', retryOf: { better: 'Better phrasing' } });
+  assert.equal(onRetry.currentIndex, 3);
+
+  // Short (<7 word) clarification holds once, then second normal reply can proceed
+  const onShort = advanceScriptState(richPlan, { action: 'turn', userTurns: 4, lastUserText: 'Could you repeat that?' });
+  assert.equal(onShort.currentIndex, 3);
+  assert.equal(onShort.shortHoldUsedOnBeat, true);
+
+  // Adaptive hold on rich when lastBeatDone === false (holds up to maxTurns=2, then forces advance)
+  const onHold = advanceScriptState({ ...richPlan, lastBeatDone: false }, { action: 'turn', userTurns: 4, lastUserText: 'We just chose PostgreSQL because it seemed safer for transactions overall.' });
+  assert.equal(onHold.currentIndex, 3);
+  assert.equal(onHold.turnsOnBeat, 1);
+  const onForceAdvance = advanceScriptState({ ...onHold, lastBeatDone: false }, { action: 'turn', userTurns: 5, lastUserText: 'Specifically we needed strict ACID serializable isolation for ledger settlement balances across shards.' });
+  assert.equal(onForceAdvance.currentIndex, 4);
+  assert.equal(onForceAdvance.turnsOnBeat, 0);
+
+  // Lean mode ignores lastBeatDone: false on framing and advances deterministically
+  const leanPlan = {
+    id: 'test-lean',
+    complexity: 'lean',
+    topic: 'HR',
+    archKey: 'frontend',
+    beatIds: ['arrival_warm_smalltalk', 'framing_company_story', 'anchor_cv_deepdive', 'qa_classic_team', 'close_warm_takeaway'],
+    currentIndex: 1,
+    turnsOnBeat: 0,
+    shortHoldUsedOnBeat: false,
+    completedIds: ['arrival_warm_smalltalk'],
+    lastBeatDone: false
+  };
+  const leanNext = advanceScriptState(leanPlan, { action: 'turn', userTurns: 2, lastUserText: 'Sounds great, happy to talk through my recent backend experience here.' });
+  assert.equal(leanNext.currentIndex, 2);
+
+  // Clock safety jump to reverse_qa and closing
+  const toQa = advanceScriptState(richPlan, { action: 'turn', userTurns: 5, lastUserText: 'That makes total sense in production systems.', elapsedSeconds: 600, targetDurationSeconds: 720, archKey: 'frontend' });
+  assert.equal(SCRIPT_BEAT_MAP[toQa.beatIds[toQa.currentIndex]].stage, 'reverse_qa');
+  const toClose = advanceScriptState(toQa, { action: 'turn', userTurns: 6, lastUserText: 'What does onboarding look like in the first month?', elapsedSeconds: 685, targetDurationSeconds: 720, archKey: 'frontend' });
+  assert.equal(SCRIPT_BEAT_MAP[toClose.beatIds[toClose.currentIndex]].stage, 'closing');
+
+  // 6. Invisible session store + meta leak protection + Small (4096 ctx) budget guard
+  const created = resolveOrCreateScriptSession({
+    action: 'start',
+    topic: 'Technical',
+    archKey: 'ceo',
+    targetDurationSeconds: 1500,
+    tierInfo: tierFor('qwen3.6:27b'),
+    hasScreenShare: true
+  });
+  assert.ok(created.scriptSessionId.startsWith('ss_'));
+  updateScriptSessionPlan(created.scriptSessionId, { ...created.plan, currentIndex: 1 });
+  recordScriptBeatSignal(created.scriptSessionId, false);
+  const renderedRichHold = renderScriptPacingDirectives({ ...richPlan, turnsOnBeat: 1 }, { firstName: 'Alex', avatarName: 'Maya', companyName: 'Kestrel', topic: 'Technical' });
+  assert.match(renderedRichHold.pacingBlock, /DEPTH HOLD ACTIVE/);
+  assert.match(renderedRichHold.pacingBlock, /UPCOMING TRANSITION HINT/);
+  const metaCheck = extractCoachMeta({ expression: 'curious', beatDone: false, grammarFixes: [] });
+  assert.equal(metaCheck.beatDone, false);
+
+  // Mid-call recovery with unknown token positions cursor past arrival/framing
+  const recovered = resolveOrCreateScriptSession({
+    scriptSessionId: 'ss_nonexistent_after_restart',
+    action: 'turn',
+    topic: 'Technical',
+    archKey: 'ceo',
+    userTurns: 4,
+    targetDurationSeconds: 1500,
+    tierInfo: tierFor('qwen3.6:35b-a3b-q8_0')
+  });
+  assert.equal(recovered.recovered, true);
+  assert.ok(recovered.plan.currentIndex >= 3);
+
+  // Cleanup & bounded session store check
+  clearScriptSession(created.scriptSessionId);
+  clearScriptSession(recovered.scriptSessionId);
+  for (let i = 0; i < MAX_SCRIPT_SESSIONS + 12; i++) {
+    resolveOrCreateScriptSession({ action: 'start', topic: 'HR', archKey: 'frontend', tierInfo: tierFor('qwen2.5:7b') });
+  }
+  assert.ok(getScriptSessionCount() <= MAX_SCRIPT_SESSIONS);
+
+  // Small (4096) compact prompt stays <= 58% budget across ALL beats of a lean script
+  const leanPromptPlan = generateInterviewScript({ topic: 'HR', archKey: 'frontend', targetDurationSeconds: 720, complexity: 'lean' });
+  const smallTier = tierFor('qwen2.5:7b');
+  for (let bIdx = 0; bIdx < leanPromptPlan.beatIds.length; bIdx++) {
+    const stepPlan = { ...leanPromptPlan, currentIndex: bIdx, completedIds: leanPromptPlan.beatIds.slice(0, bIdx) };
+    const pacing = buildInterviewPacingDirectives({
+      action: bIdx === 0 ? 'start' : 'turn',
+      topic: 'HR',
+      archKey: 'frontend',
+      firstName: 'Alex',
+      avatarName: 'Sarah',
+      companyName: 'VeloPay',
+      compactMode: true,
+      scriptPlan: stepPlan
+    });
+    assert.ok(pacing.pacingBlock.length <= 360, `Lean pacingBlock too long (${pacing.pacingBlock.length}) on beat ${bIdx}`);
+    const built = buildInterviewPrompt({
+      compactPrompt: true,
+      activeProfilePrompt: 'Senior Engineer with 7 years Node.js/TypeScript & React experience.',
+      meta: { avatarName: 'Sarah', title: 'HR Recruiter' },
+      companyName: 'VeloPay',
+      topic: 'HR',
+      archKey: 'frontend',
+      firstName: 'Alex',
+      personalityBlock: 'INTERVIEWER STYLE (Calm & Warm): Natural, polite, grounded.',
+      pacing,
+      agentPrompt: 'Conduct a balanced HR screen.',
+      jdPrompt: 'Senior Frontend Engineer at VeloPay.',
+      enableBeatSignal: false
+    });
+    assert.equal(built.systemPrompt.includes('beatDone'), false, 'Small prompt must not request beatDone');
+    const approxTokens = Math.ceil((built.systemPrompt.length + 6 * 220) / 4);
+    assert.ok(approxTokens <= smallTier.budgets.numCtx * 0.58, `Small token estimate ${approxTokens} exceeded 58% of 4096`);
+  }
 });

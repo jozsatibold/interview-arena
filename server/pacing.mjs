@@ -5,6 +5,7 @@
  */
 
 import { getRoleCategory, getLeadershipTier, ROLE_ARCHETYPES } from '../shared/role-archetypes.mjs';
+import { renderScriptPacingDirectives } from '../shared/interview-script-engine.mjs';
 
 /**
  * Remove legacy "How to Start Immediately" sections from static agent markdown prompts
@@ -268,8 +269,21 @@ export function buildInterviewPacingDirectives({
   companyName = '',
   personality = null,
   openerHint = null,
-  compactMode = false
+  compactMode = false,
+  scriptPlan = null
 }) {
+  if (scriptPlan && Array.isArray(scriptPlan.beatIds) && scriptPlan.beatIds.length > 0) {
+    return renderScriptPacingDirectives(scriptPlan, {
+      firstName,
+      avatarName,
+      companyName,
+      personality,
+      openerHint,
+      topic,
+      targetDurationSeconds,
+      compactMode
+    });
+  }
   const isStart = action === 'start' || userTurns === 0;
   const durSec = Number(targetDurationSeconds);
   const hasClock = Number.isFinite(durSec) && durSec > 0 && Number.isFinite(Number(elapsedSeconds));
@@ -446,7 +460,8 @@ export function buildInterviewPrompt({
   delimiter = '---COACH_JSON---',
   isContinuous = true,
   action = 'turn',
-  retryOf = null
+  retryOf = null,
+  enableBeatSignal = false
 }) {
   const ndaClause = 'unless the candidate makes a major interview red flag (badmouthing past teams or sharing confidential internal data)';
   const flowRule = isContinuous
@@ -509,9 +524,9 @@ ${delimiter}
   "expression": "warm" | "curious" | "firm" | "amused" | "skeptical",
   "coachPause": null | {"category":"B2-to-Senior"|"Grammar"|"Non-Native"|"Anti-Freeze"|"NDA-Safety","original":"phrase","reasonHu":"short English explanation","seniorUpgrades":["upgrade 1","upgrade 2"]},
   "grammarFixes": [] | [{"type":"Grammar"|"Phrasing"|"Non-Native"|"Senior-Tone","said":"exact weak or ungrammatical phrase candidate said","better":"natural C1 Senior phrasing fix","why":"1 concise sentence explaining the fix"}],
-  "microTipHu": null | "1 short vocabulary/delivery tip"
+  "microTipHu": null | "1 short vocabulary/delivery tip"${enableBeatSignal ? ',\n  "beatDone": true | false' : ''}
 }
-On EVERY "turn" (not "start"): include 1-2 "grammarFixes" whenever anything grammatical or phrasing-wise can be improved! On "start", set "grammarFixes": [].
+On EVERY "turn" (not "start"): include 1-2 "grammarFixes" whenever anything grammatical or phrasing-wise can be improved! On "start", set "grammarFixes": [].${enableBeatSignal ? `\nOn "beatDone": set false ONLY if ${firstName} gave a vague/incomplete answer that needs 1 focused follow-up on the active beat; otherwise true.` : ''}
 ${flowRule}${action === 'turn' && retryOf?.better ? `\n\nRETRY PRACTICE NOTE: ${firstName} clicked "Say It Again" to practice improving "${String(retryOf.said || '').slice(0, 180)}" -> "${String(retryOf.better).slice(0, 240)}". Briefly acknowledge cleanly, then ask your next follow-up.` : ''}`;
 
   const startPrompt = `${pacing.startPrompt}\nThen output ${delimiter} with empty grammarFixes and null coachPause.`;

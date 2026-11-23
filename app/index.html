@@ -329,27 +329,35 @@
       </div>
 
       <div class="controls-bar">
-        <div class="filter-chips" role="group" aria-label="Filter topics">
-          <button type="button" class="chip is-active" data-topic="ALL">All Topics</button>
-          <button type="button" class="chip" data-topic="HR">HR &amp; Pitch</button>
-          <button type="button" class="chip" data-topic="Behavioral">Behavioral</button>
-          <button type="button" class="chip" data-topic="Technical">Technical</button>
-          <button type="button" class="chip" data-topic="Live Coding">Live Coding</button>
-          <button type="button" class="chip" data-topic="System Design">System Design</button>
-          <button type="button" class="chip" data-topic="Negotiation">Negotiation</button>
+        <div class="controls-topics-row">
+          <div class="filter-chips" role="group" aria-label="Filter topics">
+            <button type="button" class="chip is-active" data-topic="ALL">All Topics</button>
+            <button type="button" class="chip" data-topic="HR">HR &amp; Pitch</button>
+            <button type="button" class="chip" data-topic="Behavioral">Behavioral</button>
+            <button type="button" class="chip" data-topic="Technical">Technical</button>
+            <button type="button" class="chip" data-topic="Live Coding">Live Coding</button>
+            <button type="button" class="chip" data-topic="System Design">System Design</button>
+            <button type="button" class="chip" data-topic="Negotiation">Negotiation</button>
+          </div>
         </div>
 
-        <label class="jd-picker">
-          <span>Target Role:</span>
-          <select id="role-track-select" aria-label="Target Tech Company Role Track"></select>
-        </label>
-        <button type="button" id="btn-role-playbook" class="btn btn-secondary btn-compact" title="Inspect Senior Knowledge Base, Frameworks &amp; Interview Rubrics for this role">📚 Role Playbook</button>
+        <div class="path-targets-grid">
+          <div class="target-control-card">
+            <label for="role-track-select" class="control-eyebrow">🎯 Target Role</label>
+            <div class="control-input-row">
+              <select id="role-track-select" class="control-select" aria-label="Target Tech Company Role Track"></select>
+              <button type="button" id="btn-role-playbook" class="btn btn-surface btn-compact" title="Inspect Senior Knowledge Base, Frameworks &amp; Interview Rubrics for this role">📚 Role Playbook</button>
+            </div>
+          </div>
 
-        <label class="jd-picker">
-          <span>Target Fake Job:</span>
-          <select id="global-jd-select"></select>
-        </label>
-        <button type="button" id="btn-new-fake-job" class="btn btn-secondary btn-compact" title="Generate a brand-new Fake Job tailored to your active CV">✨ New Fake Job</button>
+          <div class="target-control-card">
+            <label for="global-jd-select" class="control-eyebrow">💼 Target Fake Job</label>
+            <div class="control-input-row">
+              <select id="global-jd-select" class="control-select" aria-label="Target Fake Job"></select>
+              <button type="button" id="btn-new-fake-job" class="btn btn-secondary btn-compact" title="Generate a brand-new Fake Job tailored to your active CV">✨ New Fake Job</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <details id="active-fake-job-preview" class="fake-job-preview">
